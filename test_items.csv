@@ -1,0 +1,4 @@
+external_id,text,label
+item001,"This is the first annotation item",positive
+item002,"This is the second annotation item",negative
+item003,"This is the third annotation item",neutral

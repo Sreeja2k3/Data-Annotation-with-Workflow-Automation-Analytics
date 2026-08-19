@@ -1,0 +1,14 @@
+[
+  {
+    "external_id": "json-item-001",
+    "text": "This is the first JSON annotation item."
+  },
+  {
+    "external_id": "json-item-002",
+    "text": "This is the second JSON annotation item."
+  },
+  {
+    "external_id": "json-item-003",
+    "text": "This is the third JSON annotation item."
+  }
+]
