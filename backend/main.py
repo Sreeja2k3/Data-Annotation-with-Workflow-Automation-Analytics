@@ -998,7 +998,7 @@ def get_dashboard_analytics(
     db: Session = Depends(get_db)
 ):
     """Project-level KPI stats (completion %, status counts, turnaround time, agreement) (FR-6.1)."""
-    check_project_role(project_id, current_user, db, ["Admin", "Product Owner", "Project Manager"])
+    check_project_role(project_id, current_user, db, ["Admin", "Product Owner", "Project Manager", "Annotator", "Reviewer"])
     return get_project_dashboard_stats(db, project_id)
 
 @app.get("/api/projects/{project_id}/analytics/annotators")

@@ -24,17 +24,27 @@ import {
   Activity,
   ArrowUpRight,
   ShieldCheck,
+  CheckSquare,
+  ClipboardList,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export const ProjectDashboard: React.FC = () => {
-  const { currentProject } = useProject();
+  const { currentProject, currentUserRole } = useProject();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [activity, setActivity] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchDashboardData = async () => {
     if (!currentProject) return;
     setLoading(true);
+    setError(null);
     try {
       const [statsData, activityData] = await Promise.all([
         apiFetch<DashboardStats>(`/projects/${currentProject.id}/analytics/dashboard`),
@@ -42,8 +52,9 @@ export const ProjectDashboard: React.FC = () => {
       ]);
       setStats(statsData);
       setActivity(activityData);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load dashboard:', err);
+      setError(err?.message || 'Failed to load project dashboard metrics.');
     } finally {
       setLoading(false);
     }
@@ -63,10 +74,27 @@ export const ProjectDashboard: React.FC = () => {
     );
   }
 
-  if (loading || !stats) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center p-12 text-slate-400 text-xs animate-pulse">
-        Loading project metrics...
+      <div className="flex flex-col items-center justify-center p-16 text-slate-400 text-xs animate-pulse space-y-3">
+        <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+        <span>Loading project metrics...</span>
+      </div>
+    );
+  }
+
+  if (error || !stats) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+        <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+        <h3 className="text-sm font-bold text-slate-200">Unable to load dashboard metrics</h3>
+        <p className="text-xs text-slate-400">{error || 'An unexpected error occurred while fetching metrics.'}</p>
+        <button
+          onClick={fetchDashboardData}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition shadow-md"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Retry
+        </button>
       </div>
     );
   }
@@ -92,6 +120,48 @@ export const ProjectDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Annotator Quick-Action Banner */}
+      {currentUserRole === 'Annotator' && (
+        <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-800/60 shadow-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400">
+              <CheckSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">Welcome, {user?.name || 'Annotator'}!</h4>
+              <p className="text-[11px] text-slate-400">You have priority tasks assigned to you in this project.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/my-tasks')}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition shadow-sm shrink-0"
+          >
+            Go to My Assigned Queue <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Reviewer Quick-Action Banner */}
+      {currentUserRole === 'Reviewer' && (
+        <div className="p-4 rounded-xl bg-purple-950/30 border border-purple-800/60 shadow-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-600/20 text-purple-400">
+              <ClipboardList className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">Welcome, {user?.name || 'Reviewer'}!</h4>
+              <p className="text-[11px] text-slate-400">Submitted annotations are waiting for your quality review.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/review-queue')}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition shadow-sm shrink-0"
+          >
+            Go to Review Queue <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Project Overview Card */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
