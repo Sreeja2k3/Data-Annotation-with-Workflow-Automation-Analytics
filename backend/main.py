@@ -21,7 +21,7 @@ from backend.schemas import (
     ProjectSettingOut, ProjectSettingUpdate,
     SchemaVersionCreate, SchemaVersionOut,
     DatasetOut,
-    TaskOut, TaskSubmit, TaskAssign, TaskReassign, TaskPriorityUpdate, TaskReopen,
+    TaskOut, TaskCreate, TaskSubmit, TaskAssign, TaskReassign, TaskPriorityUpdate, TaskReopen,
     ReviewCreate, ReviewOut,
     CommentCreate, CommentOut,
     ImportJobOut, ImportConfirmRequest,
@@ -746,6 +746,40 @@ def list_tasks(
     if assignee_id:
         query = query.filter(Task.assigned_to == assignee_id)
     return query.order_by(Task.created_at.desc()).offset(offset).limit(limit).all()
+
+@app.post("/api/projects/{project_id}/tasks", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
+def create_project_task(
+    project_id: int,
+    t_in: TaskCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Creates a new task in Unassigned status (or Assigned if assignee specified)."""
+    check_project_role(project_id, current_user, db, ["Admin", "Project Manager"])
+    
+    schema = db.query(SchemaVersion).filter(SchemaVersion.project_id == project_id).order_by(SchemaVersion.version_number.desc()).first()
+    task_status = "Assigned" if t_in.assigned_to else "Unassigned"
+    now = datetime.datetime.utcnow()
+    
+    task = Task(
+        project_id=project_id,
+        data_ref=t_in.data_ref,
+        status=task_status,
+        priority=t_in.priority or "Normal",
+        assigned_to=t_in.assigned_to,
+        schema_version_id=schema.id if schema else None,
+        assigned_at=now if t_in.assigned_to else None,
+        created_at=now,
+        updated_at=now
+    )
+    db.add(task)
+    db.flush()
+    
+    log_audit_event(db, current_user.id, "create_task", "task", task.id, {"status": task.status, "priority": task.priority})
+    record_status_history(db, task, None, task.status, current_user.id, "Task manually created by PM")
+    db.commit()
+    db.refresh(task)
+    return task
 
 @app.get("/api/projects/{project_id}/tasks/my", response_model=List[TaskOut])
 def list_my_tasks(

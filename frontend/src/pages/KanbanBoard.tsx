@@ -14,6 +14,10 @@ import {
   ArrowRight,
   RefreshCw,
   SlidersHorizontal,
+  Plus,
+  CheckCircle2,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 
 const STATUS_COLUMNS: TaskStatus[] = [
@@ -38,6 +42,7 @@ export const KanbanBoard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
   const [selectedAssignee, setSelectedAssignee] = useState<string>('all');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
 
   // Manual Reassignment Modal
   const [reassignModalOpen, setReassignModalOpen] = useState<boolean>(false);
@@ -45,6 +50,12 @@ export const KanbanBoard: React.FC = () => {
   const [newAssigneeId, setNewAssigneeId] = useState<number | ''>('');
   const [reassignReason, setReassignReason] = useState<string>('');
   const [actionLoading, setActionLoading] = useState<boolean>(false);
+
+  // Create Task Modal
+  const [createTaskModalOpen, setCreateTaskModalOpen] = useState<boolean>(false);
+  const [newTaskDataRef, setNewTaskDataRef] = useState<string>('');
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('Normal');
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState<number | ''>('');
 
   const fetchKanban = async () => {
     if (!currentProject) return;
@@ -70,11 +81,61 @@ export const KanbanBoard: React.FC = () => {
   const handleAutoAssign = async () => {
     if (!currentProject) return;
     setActionLoading(true);
+    setFeedback(null);
     try {
-      await apiFetch(`/projects/${currentProject.id}/assignments/auto`, { method: 'POST' });
+      const res: any = await apiFetch(`/projects/${currentProject.id}/assignments/auto`, { method: 'POST' });
+      const count = res?.assigned_count ?? 0;
+      if (count > 0) {
+        setFeedback({
+          type: 'success',
+          message: `Successfully auto-assigned ${count} task(s) to eligible annotators using load-balancing!`,
+        });
+      } else {
+        setFeedback({
+          type: 'info',
+          message: `No unassigned tasks found in this project. All tasks are currently assigned or in flight. Click "+ Add Task" to create an unassigned task!`,
+        });
+      }
       fetchKanban();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Auto-assignment failed:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Auto-assignment failed.',
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCreateTaskSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentProject || !newTaskDataRef.trim()) return;
+    setActionLoading(true);
+    setFeedback(null);
+    try {
+      const created: any = await apiFetch(`/projects/${currentProject.id}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({
+          data_ref: newTaskDataRef.trim(),
+          priority: newTaskPriority,
+          assigned_to: newTaskAssigneeId ? Number(newTaskAssigneeId) : null,
+        }),
+      });
+      setCreateTaskModalOpen(false);
+      setNewTaskDataRef('');
+      setNewTaskPriority('Normal');
+      setNewTaskAssigneeId('');
+      setFeedback({
+        type: 'success',
+        message: `Task #${created.id} successfully created in "${created.status}" state!`,
+      });
+      fetchKanban();
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Failed to create task.',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -85,6 +146,7 @@ export const KanbanBoard: React.FC = () => {
     if (!currentProject || !selectedTaskId || !newAssigneeId || !reassignReason.trim()) return;
 
     setActionLoading(true);
+    setFeedback(null);
     try {
       await apiFetch(`/projects/${currentProject.id}/tasks/${selectedTaskId}/reassign`, {
         method: 'POST',
@@ -97,9 +159,17 @@ export const KanbanBoard: React.FC = () => {
       setSelectedTaskId(null);
       setNewAssigneeId('');
       setReassignReason('');
+      setFeedback({
+        type: 'success',
+        message: `Task #${selectedTaskId} successfully reassigned!`,
+      });
       fetchKanban();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Reassignment failed:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Reassignment failed.',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -151,6 +221,14 @@ export const KanbanBoard: React.FC = () => {
             ))}
           </select>
 
+          {/* Add Task Button */}
+          <button
+            onClick={() => setCreateTaskModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold text-xs transition shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-400" /> Add Task
+          </button>
+
           {/* Auto Assign Trigger */}
           <button
             onClick={handleAutoAssign}
@@ -162,13 +240,33 @@ export const KanbanBoard: React.FC = () => {
 
           <button
             onClick={fetchKanban}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 transition"
             title="Refresh board"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {feedback && (
+        <div
+          className={`p-3 rounded-lg text-xs flex items-center justify-between gap-2 animate-fade-in ${
+            feedback.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+              : feedback.type === 'info'
+              ? 'bg-sky-500/10 border border-sky-500/30 text-sky-300'
+              : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedback.type === 'success' && <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />}
+            {feedback.type === 'info' && <Info className="w-4 h-4 shrink-0 text-sky-400" />}
+            {feedback.type === 'error' && <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />}
+            <span>{feedback.message}</span>
+          </div>
+          <button onClick={() => setFeedback(null)} className="text-slate-400 hover:text-slate-200 text-xs">✕</button>
+        </div>
+      )}
 
       {/* 10-COLUMN KANBAN BOARD */}
       <div className="flex-1 overflow-x-auto pb-4">
@@ -295,6 +393,78 @@ export const KanbanBoard: React.FC = () => {
               className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold transition shadow-md disabled:opacity-50"
             >
               {actionLoading ? 'Reassigning...' : 'Confirm Reassign'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Create Task Modal */}
+      <Modal
+        isOpen={createTaskModalOpen}
+        onClose={() => setCreateTaskModalOpen(false)}
+        title="Create New Project Task"
+      >
+        <form onSubmit={handleCreateTaskSubmit} className="space-y-4 text-xs">
+          <div>
+            <label className="block text-xs font-semibold text-slate-200 mb-1">
+              Data Reference / Content <span className="text-rose-400">*</span>
+            </label>
+            <textarea
+              rows={3}
+              required
+              value={newTaskDataRef}
+              onChange={(e) => setNewTaskDataRef(e.target.value)}
+              placeholder='Enter sentence, image URL, or JSON e.g. {"text": "Speeding car near pedestrian crossing"}'
+              className="w-full bg-slate-850 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-200 mb-1">Priority</label>
+              <select
+                value={newTaskPriority}
+                onChange={(e) => setNewTaskPriority(e.target.value as TaskPriority)}
+                className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="Low">Low</option>
+                <option value="Normal">Normal</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-200 mb-1">Initial Assignee</label>
+              <select
+                value={newTaskAssigneeId}
+                onChange={(e) => setNewTaskAssigneeId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">-- Unassigned (For Auto-Assign) --</option>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.user?.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setCreateTaskModalOpen(false)}
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={actionLoading || !newTaskDataRef.trim()}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold transition shadow-md disabled:opacity-50"
+            >
+              {actionLoading ? 'Creating...' : 'Create Task'}
             </button>
           </div>
         </form>

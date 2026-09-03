@@ -170,6 +170,12 @@ class CommentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 # --- TASK SCHEMAS ---
+class TaskCreate(BaseModel):
+    data_ref: str
+    priority: Optional[str] = "Normal"
+    assigned_to: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
 class TaskSubmit(BaseModel):
     payload_json: str # JSON string of annotations
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
