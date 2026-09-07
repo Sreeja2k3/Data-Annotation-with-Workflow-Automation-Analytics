@@ -143,6 +143,7 @@ def create_import_job_and_validate(
         total_rows=len(valid_items) + len(error_list),
         valid_rows=len(valid_items),
         invalid_rows=len(error_list),
+        raw_valid_data_json=json.dumps(valid_items) if valid_items else None,
         created_by=user_id,
         created_at=datetime.datetime.utcnow()
     )

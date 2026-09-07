@@ -197,30 +197,46 @@ export const TaskWorkspace: React.FC = () => {
           <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-emerald-400" />
+                {imageUrl ? <ImageIcon className="w-4 h-4 text-emerald-400" /> : <FileText className="w-4 h-4 text-blue-400" />}
                 Data Reference (Task #{task.id})
               </h3>
-              <span className="text-[11px] text-slate-500 font-mono">Schema v{task.schema_version?.version_number || 1}</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${imageUrl ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+                  {imageUrl ? 'Image Asset' : 'Text / Metadata Record'}
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">Schema v{task.schema_version?.version_number || 1}</span>
+              </div>
             </div>
 
             {imageUrl ? (
-              <div className="rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center max-h-96">
-                <img
-                  src={imageUrl}
-                  alt="Annotation Preview"
-                  className="max-h-96 w-auto object-contain"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
+              <div className="space-y-3">
+                <div className="rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center max-h-96">
+                  <img
+                    src={imageUrl}
+                    alt="Annotation Preview"
+                    className="max-h-96 w-auto object-contain rounded-lg"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+                {dataContent.description && (
+                  <div className="px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-300 font-mono flex items-center gap-2">
+                    <span className="text-emerald-400 font-semibold">Asset Description:</span>
+                    <span>{dataContent.description}</span>
+                  </div>
+                )}
               </div>
-            ) : null}
-
-            {textContent ? (
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
-                {textContent}
+            ) : (
+              <div className="space-y-2">
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
+                  {textContent}
+                </div>
+                <p className="text-[11px] text-slate-500 italic">
+                  💡 Note: This task was created from a text record. To annotate images, open tasks with image URLs (like Tasks #1 to #6) or import an image dataset (e.g. sample_1_autonomous_vehicles.csv).
+                </p>
               </div>
-            ) : null}
+            )}
           </div>
 
           {/* Guidelines Box */}

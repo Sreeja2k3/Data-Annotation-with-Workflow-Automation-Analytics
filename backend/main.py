@@ -97,7 +97,7 @@ def seed_database():
         p1 = Project(
             name="Autonomous Vehicles Perception",
             description="Annotating pedestrians, vehicles, and road obstacles in autonomous camera feeds.",
-            schema_json=json.dumps({"categories": ["Car", "Pedestrian", "Cyclist", "Traffic Light", "Stop Sign"]}),
+            schema_json=json.dumps({"categories": ["Car", "Bus", "Truck", "Motorcycle", "Cyclist", "Pedestrian", "Traffic Light", "Stop Sign", "Traffic Sign"]}),
             settings_json=json.dumps({"domain": "Computer Vision", "priority": "High"}),
             created_by=admin.id
         )
@@ -134,7 +134,7 @@ def seed_database():
             project_id=p1.id,
             version_number=1,
             taxonomy_json=p1.schema_json,
-            guidelines_text="1. Tag all visible roadway entities.\n2. Distinguish Pedestrians from Cyclists.\n3. Verify traffic lights are active.",
+            guidelines_text="1. Tag all visible roadway entities using their respective bounding boxes or classes.\n2. Distinguish Passenger Cars, City Buses, and Commercial Trucks.\n3. Classify Pedestrians, Cyclists (bicycles), and Motorcycles accurately.\n4. Distinguish Traffic Lights from Traffic Signs (Stop Signs, Speed Limits, Warning Signs).\n5. For occluded, blurry, or distant objects, adjust the confidence slider accordingly.",
             defined_by=po.id
         )
         db.add(schema_v1)
@@ -701,11 +701,19 @@ def confirm_import_and_generate_tasks(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
 
-    # Generate synthetic items if needed or parse standard sample
-    sample_items = [
-        {"data_ref": json.dumps({"text": f"Imported sample record #{i+1}", "index": i+1})}
-        for i in range(max(1, job.valid_rows))
-    ]
+    # Load parsed items from import job or generate fallback synthetic items
+    sample_items = []
+    if job.raw_valid_data_json:
+        try:
+            sample_items = json.loads(job.raw_valid_data_json)
+        except Exception:
+            sample_items = []
+
+    if not sample_items:
+        sample_items = [
+            {"data_ref": json.dumps({"text": f"Imported sample record #{i+1}", "index": i+1})}
+            for i in range(max(1, job.valid_rows))
+        ]
 
     dataset, tasks_count = confirm_and_ingest_import(
         db, project_id, job_id, current_user.id,

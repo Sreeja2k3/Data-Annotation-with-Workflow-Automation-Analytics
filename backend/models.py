@@ -183,7 +183,8 @@ class Comment(Base):
     # Relationships
     task = relationship("Task", back_populates="comments")
     author = relationship("User", back_populates="comments")
-    replies = relationship("Comment", backref="parent", remote_side=[id], cascade="all, delete-orphan", single_parent=True)
+    parent = relationship("Comment", remote_side=[id], back_populates="replies")
+    replies = relationship("Comment", back_populates="parent", cascade="all, delete-orphan")
 
 
 class TaskStatusHistory(Base):
@@ -276,6 +277,7 @@ class ImportJob(Base):
     total_rows = Column(Integer, default=0, nullable=False)
     valid_rows = Column(Integer, default=0, nullable=False)
     invalid_rows = Column(Integer, default=0, nullable=False)
+    raw_valid_data_json = Column(Text, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
