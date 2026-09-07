@@ -1,0 +1,26 @@
+[
+  {
+    "id": 101,
+    "text": "The delivery arrived 3 hours ahead of schedule and the packaging was completely intact. Very impressed!",
+    "channel": "mobile_app",
+    "customer_tier": "gold"
+  },
+  {
+    "id": 102,
+    "text": "The customer support agent disconnected the chat before resolving my refund request.",
+    "channel": "live_chat",
+    "customer_tier": "standard"
+  },
+  {
+    "id": 103,
+    "text": "Pricing is fair, but the web interface takes too long to load large report files.",
+    "channel": "email_survey",
+    "customer_tier": "enterprise"
+  },
+  {
+    "id": 104,
+    "text": "Excellent voice recognition and quick checkout experience on the mobile app.",
+    "channel": "ios_store_review",
+    "customer_tier": "silver"
+  }
+]
