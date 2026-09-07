@@ -27,6 +27,8 @@ export const TaskWorkspace: React.FC = () => {
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedLabel, setSelectedLabel] = useState<string>('');
+  const [customLabel, setCustomLabel] = useState<string>('');
+  const [annotatorNotes, setAnnotatorNotes] = useState<string>('');
   const [confidence, setConfidence] = useState<number>(1.0);
   const [categories, setCategories] = useState<string[]>([]);
   const [guidelines, setGuidelines] = useState<string>('');
@@ -60,7 +62,10 @@ export const TaskWorkspace: React.FC = () => {
         const latest = data.versions[data.versions.length - 1];
         try {
           const p = JSON.parse(latest.payload_json);
-          if (p.label) setSelectedLabel(p.label);
+          if (p.raw_label) setSelectedLabel(p.raw_label);
+          else if (p.label) setSelectedLabel(p.label);
+          if (p.custom_label) setCustomLabel(p.custom_label);
+          if (p.notes) setAnnotatorNotes(p.notes);
           if (p.confidence) setConfidence(p.confidence);
         } catch {
           // Ignored
@@ -87,11 +92,20 @@ export const TaskWorkspace: React.FC = () => {
       return;
     }
 
+    if (selectedLabel === 'Other / Out of Taxonomy' && !customLabel.trim()) {
+      setFeedback({ type: 'error', message: 'Please specify what the object or image contains in the custom label box.' });
+      return;
+    }
+
     setSubmitting(true);
     setFeedback(null);
     try {
+      const finalLabel = selectedLabel === 'Other / Out of Taxonomy' ? (customLabel.trim() || 'Other') : selectedLabel;
       const payload_json = JSON.stringify({
-        label: selectedLabel,
+        label: finalLabel,
+        raw_label: selectedLabel,
+        custom_label: customLabel.trim() || undefined,
+        notes: annotatorNotes.trim() || undefined,
         confidence: Number(confidence),
         timestamp: new Date().toISOString(),
       });
@@ -302,6 +316,42 @@ export const TaskWorkspace: React.FC = () => {
                   </button>
                 ))
               )}
+
+              {/* Other / Out of Taxonomy Button */}
+              <button
+                type="button"
+                disabled={isReadOnly}
+                onClick={() => setSelectedLabel('Other / Out of Taxonomy')}
+                className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-semibold transition flex items-center justify-between ${
+                  selectedLabel === 'Other / Out of Taxonomy'
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md ring-1 ring-amber-500/50'
+                    : 'bg-slate-850 border-dashed border-slate-700 text-slate-400 hover:bg-slate-800 hover:border-slate-600 hover:text-slate-200'
+                } disabled:opacity-60`}
+              >
+                <span>🏷️ Other / Out of Scope (Custom Label)</span>
+                {selectedLabel === 'Other / Out of Taxonomy' && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
+              </button>
+
+              {/* Custom Label Input if Other selected */}
+              {selectedLabel === 'Other / Out of Taxonomy' && (
+                <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/40 space-y-2 mt-2">
+                  <label className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                    Specify what the image/item contains:
+                  </label>
+                  <input
+                    type="text"
+                    value={customLabel}
+                    disabled={isReadOnly}
+                    onChange={(e) => setCustomLabel(e.target.value)}
+                    placeholder="e.g. Clock / Watch (Unrelated asset), Construction Barrier, Dog, Glare..."
+                    className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 ring-1 ring-amber-500/20 font-medium"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    This custom label will be submitted to the reviewer and logged in the QA audit trail.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Confidence Slider */}
@@ -319,6 +369,22 @@ export const TaskWorkspace: React.FC = () => {
                 value={confidence}
                 onChange={(e) => setConfidence(parseFloat(e.target.value))}
                 className="w-full accent-emerald-500 cursor-pointer disabled:opacity-50"
+              />
+            </div>
+
+            {/* Annotator Notes (Optional) */}
+            <div className="pt-3 border-t border-slate-800 space-y-1.5">
+              <label className="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-slate-400" />
+                Annotator Notes & Observations (Optional):
+              </label>
+              <textarea
+                rows={2}
+                value={annotatorNotes}
+                disabled={isReadOnly}
+                onChange={(e) => setAnnotatorNotes(e.target.value)}
+                placeholder="Add any edge-case observations, sensor issues, or comments for the reviewer..."
+                className="w-full bg-slate-850 border border-slate-750 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none disabled:opacity-60"
               />
             </div>
 

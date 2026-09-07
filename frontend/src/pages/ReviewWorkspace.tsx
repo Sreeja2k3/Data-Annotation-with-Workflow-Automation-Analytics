@@ -257,7 +257,19 @@ export const ReviewWorkspace: React.FC = () => {
               <div>
                 <span className="text-[10px] uppercase font-bold text-slate-400">Assigned Label:</span>
                 <p className="text-lg font-black text-emerald-400 mt-0.5">{latestPayload.label || 'None'}</p>
+                {latestPayload.custom_label && (
+                  <span className="inline-block mt-1 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-medium">
+                    🏷️ Custom / Out-of-Scope: {latestPayload.custom_label}
+                  </span>
+                )}
               </div>
+
+              {latestPayload.notes && (
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Annotator Notes:</span>
+                  <p className="text-xs text-slate-200 italic">"{latestPayload.notes}"</p>
+                </div>
+              )}
 
               {latestPayload.confidence !== undefined && (
                 <div>
