@@ -114,14 +114,20 @@ export const ImportPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-          <UploadCloud className="w-5 h-5 text-emerald-400" />
-          Data Import & Ingestion Pipeline
-        </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Staged batch upload for CSV, JSON, and media archives with pre-ingestion row-level error validation.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+            <UploadCloud className="w-5 h-5 text-emerald-400" />
+            Data Import & Ingestion Pipeline
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Staged batch upload for CSV, JSON, and media archives with pre-ingestion row-level error validation.
+          </p>
+        </div>
+        <div className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2.5 text-xs">
+          <span className="text-slate-400">Target Project:</span>
+          <span className="font-bold text-emerald-400">{currentProject.name}</span>
+        </div>
       </div>
 
       {feedback && (
