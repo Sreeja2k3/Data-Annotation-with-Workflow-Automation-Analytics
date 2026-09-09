@@ -29,15 +29,41 @@ export const ExportPage: React.FC = () => {
     fetchSnapshots();
   }, [currentProject]);
 
-  const handleExportDownload = () => {
+  const handleExportDownload = async () => {
     if (!currentProject) return;
     setDownloading(true);
-    let url = `/api/projects/${currentProject.id}/export?format=${selectedFormat}`;
-    if (selectedSnapshotId) {
-      url += `&snapshot_id=${selectedSnapshotId}`;
+    try {
+      const token = localStorage.getItem('token');
+      let url = `/api/projects/${currentProject.id}/export?format=${selectedFormat}`;
+      if (selectedSnapshotId) {
+        url += `&snapshot_id=${selectedSnapshotId}`;
+      }
+      
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Export download failed. Please verify you have approved tasks to export.');
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `project_${currentProject.id}_${selectedFormat.toLowerCase()}_export.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Download failed');
+    } finally {
+      setDownloading(false);
     }
-    window.open(url, '_blank');
-    setTimeout(() => setDownloading(false), 1500);
   };
 
   if (!currentProject) {

@@ -135,14 +135,14 @@ def export_project_data(db: Session, project_id: int, format_type: str, snapshot
                     })
                     ann_id_counter += 1
 
-                # Bounding boxes
-                bboxes = payload.get("bboxes") or payload.get("annotations") or []
+                # Bounding boxes / multi-object annotations
+                bboxes = payload.get("objects") or payload.get("bboxes") or payload.get("annotations") or []
                 if isinstance(bboxes, list):
                     for box in bboxes:
                         if not isinstance(box, dict):
                             continue
                         bbox_coords = box.get("bbox")
-                        box_label = box.get("label") or box.get("category")
+                        box_label = box.get("class") or box.get("label") or box.get("category")
                         if bbox_coords and box_label:
                             if box_label not in category_mapping:
                                 cat_id = len(category_mapping) + 1
@@ -180,26 +180,29 @@ def export_project_data(db: Session, project_id: int, format_type: str, snapshot
                 payload = item.get("payload", {})
 
                 label = payload.get("label") or payload.get("category")
-                if label:
+                bboxes = payload.get("objects") or payload.get("bboxes") or payload.get("annotations") or []
+
+                if label and not bboxes:
                     if label not in category_mapping:
                         category_mapping[label] = len(classes_list)
                         classes_list.append(label)
                     yolo_lines.append(f"{category_mapping[label]} 0.5 0.5 1.0 1.0")
 
-                bboxes = payload.get("bboxes") or payload.get("annotations") or []
                 if isinstance(bboxes, list):
                     for box in bboxes:
                         if not isinstance(box, dict):
                             continue
                         bbox_coords = box.get("bbox")
-                        box_label = box.get("label") or box.get("category")
+                        box_label = box.get("class") or box.get("label") or box.get("category")
                         if bbox_coords and box_label and len(bbox_coords) >= 4:
                             if box_label not in category_mapping:
                                 category_mapping[box_label] = len(classes_list)
                                 classes_list.append(box_label)
-                            x_center = bbox_coords[0] + (bbox_coords[2] / 2)
-                            y_center = bbox_coords[1] + (bbox_coords[3] / 2)
-                            yolo_lines.append(f"{category_mapping[box_label]} {x_center} {y_center} {bbox_coords[2]} {bbox_coords[3]}")
+                            x_center = round(float(bbox_coords[0] + (bbox_coords[2] / 2)) / 800.0, 6) if bbox_coords[0] > 1.0 else round(float(bbox_coords[0] + (bbox_coords[2] / 2)), 6)
+                            y_center = round(float(bbox_coords[1] + (bbox_coords[3] / 2)) / 600.0, 6) if bbox_coords[1] > 1.0 else round(float(bbox_coords[1] + (bbox_coords[3] / 2)), 6)
+                            w_norm = round(float(bbox_coords[2]) / 800.0, 6) if bbox_coords[2] > 1.0 else round(float(bbox_coords[2]), 6)
+                            h_norm = round(float(bbox_coords[3]) / 600.0, 6) if bbox_coords[3] > 1.0 else round(float(bbox_coords[3]), 6)
+                            yolo_lines.append(f"{category_mapping[box_label]} {x_center} {y_center} {w_norm} {h_norm}")
 
                 zip_file.writestr(f"labels/task_{item['task_id']}.txt", "\n".join(yolo_lines))
 
@@ -228,7 +231,9 @@ def export_project_data(db: Session, project_id: int, format_type: str, snapshot
                 xml_content += f"  </size>\n"
 
                 label = payload.get("label") or payload.get("category")
-                if label:
+                bboxes = payload.get("objects") or payload.get("bboxes") or payload.get("annotations") or []
+
+                if label and not bboxes:
                     xml_content += f"  <object>\n"
                     xml_content += f"    <name>{label}</name>\n"
                     xml_content += f"    <bndbox>\n"
@@ -239,13 +244,12 @@ def export_project_data(db: Session, project_id: int, format_type: str, snapshot
                     xml_content += f"    </bndbox>\n"
                     xml_content += f"  </object>\n"
 
-                bboxes = payload.get("bboxes") or payload.get("annotations") or []
                 if isinstance(bboxes, list):
                     for box in bboxes:
                         if not isinstance(box, dict):
                             continue
                         bbox_coords = box.get("bbox")
-                        box_label = box.get("label") or box.get("category")
+                        box_label = box.get("class") or box.get("label") or box.get("category")
                         if bbox_coords and box_label and len(bbox_coords) >= 4:
                             xmin = int(bbox_coords[0])
                             ymin = int(bbox_coords[1])
