@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
-import { Task, Review, Comment } from '../types';
+import { Task, TaskVersion, Comment } from '../types';
 import { apiFetch } from '../lib/api';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PriorityBadge } from '../components/ui/PriorityBadge';
@@ -11,14 +11,27 @@ import {
   ArrowLeft,
   CheckCircle2,
   XCircle,
+  MessageSquare,
   HelpCircle,
   History,
-  MessageSquare,
-  AlertTriangle,
   Image as ImageIcon,
-  Send,
+  FileText,
   AlertCircle,
+  Layers,
+  Scan,
 } from 'lucide-react';
+
+const getClassColor = (name: string) => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('car') || n.includes('sedan')) return { border: '#10b981', bg: 'rgba(16, 185, 129, 0.20)', solid: '#10b981' };
+  if (n.includes('bus')) return { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.20)', solid: '#f59e0b' };
+  if (n.includes('pedestrian') || n.includes('person') || n.includes('walk')) return { border: '#06b6d4', bg: 'rgba(6, 182, 212, 0.20)', solid: '#06b6d4' };
+  if (n.includes('cyclist') || n.includes('bike') || n.includes('motor')) return { border: '#a855f7', bg: 'rgba(168, 85, 247, 0.20)', solid: '#a855f7' };
+  if (n.includes('light') || n.includes('signal')) return { border: '#10b981', bg: 'rgba(16, 185, 129, 0.20)', solid: '#059669' };
+  if (n.includes('sign') || n.includes('stop')) return { border: '#ef4444', bg: 'rgba(239, 68, 68, 0.20)', solid: '#ef4444' };
+  if (n.includes('truck')) return { border: '#f97316', bg: 'rgba(249, 115, 22, 0.20)', solid: '#f97316' };
+  return { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.20)', solid: '#8b5cf6' };
+};
 
 export const ReviewWorkspace: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -138,6 +151,20 @@ export const ReviewWorkspace: React.FC = () => {
     }
   }
 
+  const reviewBoxes: { id: string; class_name: string; x: number; y: number; w: number; h: number }[] = [];
+  if (latestPayload.objects && Array.isArray(latestPayload.objects)) {
+    latestPayload.objects.forEach((obj: any, idx: number) => {
+      reviewBoxes.push({
+        id: `review-box-${idx + 1}`,
+        class_name: obj.class || obj.label || 'Object',
+        x: obj.bbox ? obj.bbox[0] * 100 : (obj.x || 10),
+        y: obj.bbox ? obj.bbox[1] * 100 : (obj.y || 10),
+        w: obj.bbox ? obj.bbox[2] * 100 : (obj.w || 20),
+        h: obj.bbox ? obj.bbox[3] * 100 : (obj.h || 20),
+      });
+    });
+  }
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       {/* Top Bar */}
@@ -181,15 +208,70 @@ export const ReviewWorkspace: React.FC = () => {
             </div>
 
             {imageUrl && (
-              <div className="rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center max-h-96">
-                <img
-                  src={imageUrl}
-                  alt="Review Target"
-                  className="max-h-96 w-auto object-contain"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
+              <div className="space-y-3">
+                <div
+                  className="relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center select-none"
+                  style={{ minHeight: '320px', maxHeight: '450px' }}
+                >
+                  <img
+                    src={imageUrl}
+                    alt="Review Target"
+                    className="max-h-[420px] w-auto max-w-full object-contain pointer-events-none"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
+
+                  {/* Render Visual Bounding Boxes in Review Mode */}
+                  {reviewBoxes.map((box) => {
+                    const color = getClassColor(box.class_name);
+                    return (
+                      <div
+                        key={box.id}
+                        className="absolute border-2 transition-all"
+                        style={{
+                          left: `${box.x}%`,
+                          top: `${box.y}%`,
+                          width: `${box.w}%`,
+                          height: `${box.h}%`,
+                          borderColor: color.border,
+                          backgroundColor: color.bg,
+                        }}
+                      >
+                        <span
+                          className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow z-10 whitespace-nowrap"
+                          style={{ backgroundColor: color.solid }}
+                        >
+                          {box.class_name}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Marked Objects Summary */}
+                {reviewBoxes.length > 0 && (
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                      <Scan className="w-4 h-4 text-emerald-400" />
+                      <span>Marked Objects in Scene ({reviewBoxes.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {reviewBoxes.map((b, idx) => {
+                        const col = getClassColor(b.class_name);
+                        return (
+                          <span
+                            key={b.id}
+                            className="px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1.5 border"
+                            style={{ borderColor: col.border, color: col.solid, backgroundColor: col.bg }}
+                          >
+                            #{idx + 1} {b.class_name} (x:{b.x.toFixed(0)}%, y:{b.y.toFixed(0)}%, w:{b.w.toFixed(0)}%, h:{b.h.toFixed(0)}%)
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
