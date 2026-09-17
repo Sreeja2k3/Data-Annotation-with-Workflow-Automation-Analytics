@@ -92,6 +92,7 @@ def parse_and_validate_import_file(
             error_list.append({"row_index": 0, "error": f"JSON parse error: {str(e)}", "raw": ""})
 
     # 3. ZIP Archive (image or audio batch)
+    # 3. ZIP Archive (image or audio batch)
     elif ext == "zip":
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as z:
@@ -116,8 +117,27 @@ def parse_and_validate_import_file(
         except Exception as e:
             error_list.append({"row_index": 0, "error": f"ZIP archive error: {str(e)}", "raw": ""})
 
+    # 4. Direct Single Image File (.jpg, .jpeg, .png, .webp, .gif)
+    elif ext in ["jpg", "jpeg", "png", "webp", "gif"]:
+        try:
+            import base64
+            mime_type = "image/jpeg" if ext in ["jpg", "jpeg"] else f"image/{ext}"
+            b64_str = base64.b64encode(content).decode("utf-8")
+            data_uri = f"data:{mime_type};base64,{b64_str}"
+
+            valid_items.append({
+                "data_ref": json.dumps({
+                    "image_url": data_uri,
+                    "filename": filename,
+                    "description": f"Directly imported image asset: {filename}"
+                }),
+                "row_index": 1
+            })
+        except Exception as e:
+            error_list.append({"row_index": 1, "error": f"Image processing error: {str(e)}", "raw": filename})
+
     else:
-        error_list.append({"row_index": 0, "error": f"Unsupported file extension '.{ext}'. Supported: .csv, .json, .jsonl, .zip", "raw": ""})
+        error_list.append({"row_index": 0, "error": f"Unsupported file extension '.{ext}'. Supported: .csv, .json, .jsonl, .zip, .jpg, .png, .webp, .gif", "raw": ""})
 
     return valid_items, error_list
 

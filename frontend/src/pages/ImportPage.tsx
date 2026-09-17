@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
-import { ImportJob, TaskPriority } from '../types';
+import { ImportJob, TaskPriority, Task } from '../types';
 import { apiFetch } from '../lib/api';
 import {
   UploadCloud,
@@ -11,10 +11,17 @@ import {
   Play,
   Layers,
   ArrowRight,
+  Image as ImageIcon,
+  Link,
+  PlusCircle,
+  Sparkles,
 } from 'lucide-react';
 
 export const ImportPage: React.FC = () => {
   const { currentProject } = useProject();
+  const [activeTab, setActiveTab] = useState<'file' | 'url'>('file');
+
+  // File Upload State
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
   const [currentJob, setCurrentJob] = useState<ImportJob | null>(null);
@@ -24,6 +31,12 @@ export const ImportPage: React.FC = () => {
   const [autoAssign, setAutoAssign] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [pastJobs, setPastJobs] = useState<ImportJob[]>([]);
+
+  // Direct Single Image / URL State
+  const [singleImageUrl, setSingleImageUrl] = useState<string>('');
+  const [singleDescription, setSingleDescription] = useState<string>('');
+  const [singlePriority, setSinglePriority] = useState<TaskPriority>('Normal');
+  const [creatingSingle, setCreatingSingle] = useState<boolean>(false);
 
   const fetchPastJobs = async () => {
     if (!currentProject) return;
@@ -71,7 +84,7 @@ export const ImportPage: React.FC = () => {
       } else {
         setFeedback({
           type: 'success',
-          message: `All ${job.valid_rows} rows successfully validated with zero format errors. Ready for ingestion.`,
+          message: `All ${job.valid_rows} items successfully validated. Ready for ingestion into ${currentProject.name}.`,
         });
       }
     } catch (err: any) {
@@ -107,6 +120,44 @@ export const ImportPage: React.FC = () => {
     }
   };
 
+  const handleCreateSingleTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentProject) return;
+    if (!singleImageUrl.trim()) {
+      setFeedback({ type: 'error', message: 'Please enter an image URL or text record.' });
+      return;
+    }
+
+    setCreatingSingle(true);
+    setFeedback(null);
+    try {
+      const dataRef = JSON.stringify({
+        image_url: singleImageUrl.trim(),
+        description: singleDescription.trim() || 'Directly added image',
+        source: 'single_url_entry',
+      });
+
+      const newTask = await apiFetch<Task>(`/projects/${currentProject.id}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({
+          data_ref: dataRef,
+          priority: singlePriority,
+        }),
+      });
+
+      setFeedback({
+        type: 'success',
+        message: `Task #${newTask.id} created successfully! Available in Kanban backlog / Assigned queue.`,
+      });
+      setSingleImageUrl('');
+      setSingleDescription('');
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Failed to create single task.' });
+    } finally {
+      setCreatingSingle(false);
+    }
+  };
+
   if (!currentProject) {
     return <div className="p-8 text-center text-slate-500 text-xs">No project selected.</div>;
   }
@@ -121,7 +172,7 @@ export const ImportPage: React.FC = () => {
             Data Import & Ingestion Pipeline
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Staged batch upload for CSV, JSON, and media archives with pre-ingestion row-level error validation.
+            Import datasets via direct image upload, batch files (CSV, JSON, ZIP), or single image URL entry.
           </p>
         </div>
         <div className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2.5 text-xs">
@@ -143,39 +194,147 @@ export const ImportPage: React.FC = () => {
         </div>
       )}
 
-      {/* Upload Dropzone */}
-      <div className="p-8 rounded-2xl bg-slate-900 border-2 border-dashed border-slate-750 text-center hover:border-emerald-500/50 transition">
-        <UploadCloud className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-        <h3 className="text-sm font-semibold text-slate-200">Select Dataset File to Stage & Validate</h3>
-        <p className="text-xs text-slate-400 mt-1">Supports CSV, JSON, JSONL, or ZIP archives containing media</p>
-
-        <div className="mt-4 flex items-center justify-center gap-3">
-          <input
-            type="file"
-            id="file-upload"
-            onChange={handleFileChange}
-            accept=".csv,.json,.jsonl,.zip"
-            className="hidden"
-          />
-          <label
-            htmlFor="file-upload"
-            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer border border-slate-700"
-          >
-            {file ? file.name : 'Choose File'}
-          </label>
-
-          {file && (
-            <button
-              onClick={handleUploadAndValidate}
-              disabled={uploading}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition shadow-md disabled:opacity-50"
-            >
-              {uploading ? 'Validating Format...' : 'Validate Dataset'}
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <button
+          onClick={() => setActiveTab('file')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+            activeTab === 'file'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <UploadCloud className="w-4 h-4" /> Batch & Image File Upload
+        </button>
+        <button
+          onClick={() => setActiveTab('url')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+            activeTab === 'url'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <Link className="w-4 h-4" /> Add Single Image URL / Entry
+        </button>
       </div>
+
+      {activeTab === 'file' ? (
+        /* Upload Dropzone */
+        <div className="p-8 rounded-2xl bg-slate-900 border-2 border-dashed border-slate-750 text-center hover:border-emerald-500/50 transition">
+          <UploadCloud className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+          <h3 className="text-sm font-semibold text-slate-200">Select Image or Dataset File to Stage & Validate</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Supports direct images (<strong>.jpg, .png, .webp</strong>), batch archives (<strong>.zip</strong>), or tables (<strong>.csv, .json, .jsonl</strong>)
+          </p>
+
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <input
+              type="file"
+              id="file-upload"
+              onChange={handleFileChange}
+              accept=".csv,.json,.jsonl,.zip,.jpg,.jpeg,.png,.webp,.gif"
+              className="hidden"
+            />
+            <label
+              htmlFor="file-upload"
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-xs font-semibold text-slate-200 cursor-pointer transition flex items-center gap-2"
+            >
+              <FileText className="w-4 h-4 text-emerald-400" />
+              {file ? file.name : 'Choose File from Computer'}
+            </label>
+            {file && (
+              <button
+                onClick={handleUploadAndValidate}
+                disabled={uploading}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-950 text-xs font-bold transition flex items-center gap-2"
+              >
+                {uploading ? 'Validating File...' : 'Scan & Validate Data'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Single Image URL Form */
+        <form onSubmit={handleCreateSingleTask} className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
+            Quickly Add a Single Image to {currentProject.name}
+          </h3>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Image Web URL (HTTPS) <span className="text-rose-400">*</span>
+              </label>
+              <input
+                type="url"
+                value={singleImageUrl}
+                onChange={(e) => setSingleImageUrl(e.target.value)}
+                placeholder="https://images.unsplash.com/photo-... or any public image URL"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Asset Description / Context (Optional)</label>
+                <input
+                  type="text"
+                  value={singleDescription}
+                  onChange={(e) => setSingleDescription(e.target.value)}
+                  placeholder="e.g. City intersection with cars and cyclists"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Task Priority</label>
+                <select
+                  value={singlePriority}
+                  onChange={(e) => setSinglePriority(e.target.value as TaskPriority)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Low">Low Priority</option>
+                  <option value="Normal">Normal Priority</option>
+                  <option value="High">High Priority</option>
+                  <option value="Urgent">Urgent Priority</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Live Image Preview */}
+            {singleImageUrl && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-4">
+                <div className="w-24 h-24 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                  <img
+                    src={singleImageUrl}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+                <div className="text-xs text-slate-400 space-y-1">
+                  <p className="font-semibold text-slate-200">Image Asset Preview</p>
+                  <p className="text-[11px] text-slate-500 truncate max-w-md">{singleImageUrl}</p>
+                  <p className="text-[10px] text-emerald-400">Ready to create task in backlog</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={creatingSingle || !singleImageUrl.trim()}
+            className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-950 text-xs font-bold transition flex items-center gap-2"
+          >
+            <PlusCircle className="w-4 h-4" />
+            {creatingSingle ? 'Creating Task...' : 'Create Image Task Immediately'}
+          </button>
+        </form>
+      )}
 
       {/* Validation Inspector & Ingestion Confirmation */}
       {currentJob && (
