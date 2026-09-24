@@ -20,6 +20,9 @@ import {
   Scan,
   Trash2,
   Layers,
+  Sparkles,
+  Cpu,
+  Zap,
 } from 'lucide-react';
 
 interface BoundingBox {
@@ -58,6 +61,7 @@ export const TaskWorkspace: React.FC = () => {
   const [guidelines, setGuidelines] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [aiDetecting, setAiDetecting] = useState<boolean>(false);
 
   // Bounding box drawing state
   const [boxes, setBoxes] = useState<BoundingBox[]>([]);
@@ -194,6 +198,52 @@ export const TaskWorkspace: React.FC = () => {
     setBoxes([]);
   };
 
+  const handleAIAutoDetect = async () => {
+    if (!currentProject || !id) return;
+    setAiDetecting(true);
+    setFeedback(null);
+    try {
+      const res: any = await apiFetch(`/projects/${currentProject.id}/tasks/${id}/auto-annotate`, {
+        method: 'POST',
+      });
+
+      if (res.suggested_label) {
+        setSelectedLabel(res.suggested_label);
+      }
+      if (res.confidence) {
+        setConfidence(res.confidence);
+      }
+      if (res.notes) {
+        setAnnotatorNotes(res.notes);
+      }
+
+      if (res.objects && Array.isArray(res.objects) && res.objects.length > 0) {
+        const autoBoxes: BoundingBox[] = res.objects.map((obj: any, idx: number) => ({
+          id: `ai-box-${idx + 1}-${Date.now()}`,
+          class_name: obj.class || obj.label || 'Object',
+          x: obj.bbox ? obj.bbox[0] * 100 : 10,
+          y: obj.bbox ? obj.bbox[1] * 100 : 10,
+          w: obj.bbox ? obj.bbox[2] * 100 : 20,
+          h: obj.bbox ? obj.bbox[3] * 100 : 20,
+        }));
+        setBoxes(autoBoxes);
+        setFeedback({
+          type: 'success',
+          message: `✨ ${res.model_name} auto-detected ${autoBoxes.length} object(s) with ${Math.round(res.confidence * 100)}% confidence! You can refine or submit directly.`,
+        });
+      } else {
+        setFeedback({
+          type: 'success',
+          message: `✨ ${res.model_name} classified as '${res.suggested_label}' with ${Math.round(res.confidence * 100)}% confidence.`,
+        });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Local AI auto-detection failed.' });
+    } finally {
+      setAiDetecting(false);
+    }
+  };
+
   const handleSubmitAnnotation = async () => {
     if (!currentProject || !id || !selectedLabel) {
       setFeedback({ type: 'error', message: 'Please select a classification label before submitting.' });
@@ -301,6 +351,18 @@ export const TaskWorkspace: React.FC = () => {
           <ArrowLeft className="w-4 h-4" /> Back to Tasks
         </button>
         <div className="flex items-center gap-3">
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={handleAIAutoDetect}
+              disabled={aiDetecting}
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
+              title="Run local AI model to automatically detect and pre-label objects"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${aiDetecting ? 'animate-spin' : ''}`} />
+              {aiDetecting ? 'Local AI Detecting...' : '⚡ AI Auto-Detect (Local)'}
+            </button>
+          )}
           <PriorityBadge priority={task.priority} />
           <StatusBadge status={task.status} />
         </div>
@@ -440,15 +502,27 @@ export const TaskWorkspace: React.FC = () => {
                           Active Class: {activeDrawingClass}
                         </span>
                       </div>
-                      {boxes.length > 0 && (
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={handleClearBoxes}
-                          className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                          onClick={handleAIAutoDetect}
+                          disabled={aiDetecting}
+                          className="text-[11px] px-2.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-semibold flex items-center gap-1 transition"
+                          title="Run local AI model to detect objects"
                         >
-                          <Trash2 className="w-3 h-3" /> Clear All ({boxes.length})
+                          <Sparkles className={`w-3 h-3 ${aiDetecting ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
+                          {aiDetecting ? 'Detecting...' : 'AI Auto-Boxes'}
                         </button>
-                      )}
+                        {boxes.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearBoxes}
+                            className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" /> Clear ({boxes.length})
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {boxes.length > 0 ? (

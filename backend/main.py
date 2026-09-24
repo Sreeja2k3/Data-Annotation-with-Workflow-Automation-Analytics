@@ -45,6 +45,7 @@ from backend.analytics import (
 )
 from backend.notifications import dispatch_notification
 from backend.scheduler import start_scheduler
+from backend.ai_service import LocalAIService
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -909,6 +910,27 @@ def submit_annotation(
     """Annotator submits label: creates immutable TaskVersion, sets status In Review (FR-3.2, FR-7.1)."""
     check_project_role(project_id, current_user, db, ["Admin", "Annotator"])
     return submit_task_annotation(db, task_id, current_user, s_in.payload_json)
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/auto-annotate")
+def auto_annotate_task(
+    project_id: int,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Runs local AI model inference on a task to predict labels and bounding boxes."""
+    check_project_role(project_id, current_user, db, ["Admin", "Annotator", "Project Manager"])
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    result = LocalAIService.auto_annotate_task(db, task)
+    log_audit_event(db, current_user.id, "ai_auto_annotate", "task", task.id, {
+        "model": result["model_name"],
+        "objects_count": len(result.get("objects", [])),
+        "suggested_label": result.get("suggested_label")
+    })
+    return result
 
 @app.post("/api/projects/{project_id}/tasks/{task_id}/review", response_model=TaskOut)
 def review_annotation(
