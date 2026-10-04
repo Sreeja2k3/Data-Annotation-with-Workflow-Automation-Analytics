@@ -4,7 +4,7 @@ An enterprise-grade, production-shaped workflow automation, dataset management, 
 
 ---
 
-## 🌟 Key Capabilities & Architectural Highlights
+##  Key Capabilities & Architectural Highlights
 
 1. **Role-Based Access Control (RBAC)**:
    - **System Admin**: Project provisioning, user management, 30-day soft-delete recovery, immutable audit logs.
@@ -35,7 +35,7 @@ An enterprise-grade, production-shaped workflow automation, dataset management, 
 
 ---
 
-## 🚀 Quick Start (Local Development)
+##  Quick Start (Local Development)
 
 ### 1. Backend Setup
 ```bash
@@ -64,7 +64,7 @@ Frontend Web Application will be live at: [http://localhost:5173](http://localho
 
 ---
 
-## 🐳 Docker Deployment (Self-Hostable)
+##  Docker Deployment (Self-Hostable)
 
 ```bash
 docker-compose up --build
@@ -75,7 +75,7 @@ docker-compose up --build
 
 ---
 
-## 🔑 Pre-Seeded Demo Credentials
+##  Pre-Seeded Demo Credentials
 
 | Role | Email | Password | Permissions Summary |
 | :--- | :--- | :--- | :--- |
@@ -88,7 +88,7 @@ docker-compose up --build
 
 ---
 
-## 🧪 Running the Verification & Test Suite
+##  Running the Verification & Test Suite
 
 Run the full pytest suite covering RBAC, state machine transitions, auto-assignment, import/export formats, and the 27-step end-to-end lifecycle:
 
