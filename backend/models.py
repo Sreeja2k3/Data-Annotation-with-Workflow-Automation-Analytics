@@ -273,6 +273,7 @@ class ImportJob(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True)
+    filename = Column(String(255), nullable=True)
     status = Column(String(50), default="Pending", nullable=False) # "Pending", "Validated", "Completed", "Failed"
     total_rows = Column(Integer, default=0, nullable=False)
     valid_rows = Column(Integer, default=0, nullable=False)
@@ -283,6 +284,7 @@ class ImportJob(Base):
 
     # Relationships
     project = relationship("Project", back_populates="import_jobs")
+    dataset = relationship("Dataset")
     errors = relationship("ImportError", back_populates="import_job", cascade="all, delete-orphan")
 
 

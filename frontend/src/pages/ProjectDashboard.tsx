@@ -28,6 +28,10 @@ import {
   ClipboardList,
   AlertCircle,
   RefreshCw,
+  Bot,
+  Sparkles,
+  Server,
+  Terminal,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -41,17 +45,21 @@ export const ProjectDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [aiStatus, setAiStatus] = useState<any | null>(null);
+
   const fetchDashboardData = async () => {
     if (!currentProject) return;
     setLoading(true);
     setError(null);
     try {
-      const [statsData, activityData] = await Promise.all([
+      const [statsData, activityData, aiStatusData] = await Promise.all([
         apiFetch<DashboardStats>(`/projects/${currentProject.id}/analytics/dashboard`),
         apiFetch<any[]>(`/projects/${currentProject.id}/activity?limit=15`),
+        apiFetch<any>('/ai/status').catch(() => null),
       ]);
       setStats(statsData);
       setActivity(activityData);
+      if (aiStatusData) setAiStatus(aiStatusData);
     } catch (err: any) {
       console.error('Failed to load dashboard:', err);
       setError(err?.message || 'Failed to load project dashboard metrics.');
@@ -203,6 +211,46 @@ export const ProjectDashboard: React.FC = () => {
               />
             </svg>
           </div>
+        </div>
+      </div>
+
+      {/* Local AI & Ollama Engine Readiness Card */}
+      <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl border flex items-center justify-center ${
+            aiStatus?.ollama_available
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400'
+          }`}>
+            <Bot className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-xs font-bold text-slate-100">
+                {aiStatus?.ollama_available ? '🦙 Ollama Local LLM Connected' : '⚡ Built-in Local AI Engine Active'}
+              </h4>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                aiStatus?.ollama_available
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+              }`}>
+                {aiStatus?.ollama_available ? `${aiStatus.models?.length || 0} Model(s) Ready` : '100% Offline Ready'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {aiStatus?.ollama_available
+                ? `Active model: ${aiStatus.default_model || 'llama3.2'} on ${aiStatus.ollama_host}. Zero-cost private local inference.`
+                : `Instant zero-dependency pre-labeling for road scene bounding boxes & NLP classification without external services.`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => navigate('/my-tasks')}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center gap-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> Test in Workbench
+          </button>
         </div>
       </div>
 

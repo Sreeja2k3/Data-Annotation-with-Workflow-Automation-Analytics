@@ -52,3 +52,15 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 
   return response.json();
 }
+
+export function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return 'N/A';
+  // Ensure UTC date strings without timezone indicator ('Z' or '+/-') are treated as UTC
+  let normalized = dateStr.trim();
+  if (!normalized.endsWith('Z') && !normalized.includes('+') && !/[-+]\d{2}:\d{2}$/.test(normalized)) {
+    // If it has space instead of T, replace
+    normalized = normalized.replace(' ', 'T') + 'Z';
+  }
+  const d = new Date(normalized);
+  return isNaN(d.getTime()) ? dateStr : d.toLocaleString();
+}

@@ -27,8 +27,11 @@ services:
       DATABASE_URL: postgresql://postgres:postgrespassword@postgres:5432/annotation_ops
       SECRET_KEY: enterprise-super-secret-jwt-signing-key-production-ready-2026
       ENVIRONMENT: production
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,5 +46,17 @@ services:
     depends_on:
       - backend
 
+  # Optional containerized Ollama server for full in-Docker AI inference
+  # Start with: docker compose --profile ai up
+  ollama:
+    image: ollama/ollama:latest
+    container_name: annotation_ops_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    profiles: ["ai", "full"]
+
 volumes:
   postgres_data:
+  ollama_models:

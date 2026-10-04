@@ -23,7 +23,29 @@ import {
   Sparkles,
   Cpu,
   Zap,
+  Edit3,
+  UploadCloud,
+  RefreshCw,
+  ExternalLink,
+  Settings2,
+  Copy,
+  Check,
+  Terminal,
+  Server,
+  Bot,
+  Move,
+  Target,
+  Maximize2,
 } from 'lucide-react';
+
+interface AIStatus {
+  ollama_available: boolean;
+  ollama_host: string;
+  models: string[];
+  default_model: string | null;
+  active_engine: string;
+  message: string;
+}
 
 interface BoundingBox {
   id: string;
@@ -70,9 +92,31 @@ export const TaskWorkspace: React.FC = () => {
   const [currentBox, setCurrentBox] = useState<BoundingBox | null>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
+  // Selected box and interactive transformation state
+  const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [resizingHandle, setResizingHandle] = useState<string | null>(null);
+  const [isMovingBox, setIsMovingBox] = useState<boolean>(false);
+  const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
+  const [boxInitialGeometry, setBoxInitialGeometry] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState<string>('');
+
+  // Image loading & asset replacement state
+  const [imageError, setImageError] = useState<boolean>(false);
+  const [showEditImage, setShowEditImage] = useState<boolean>(false);
+  const [editImageUrl, setEditImageUrl] = useState<string>('');
+  const [updatingImage, setUpdatingImage] = useState<boolean>(false);
+
+  // AI & Ollama Engine state
+  const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
+  const [selectedAiProvider, setSelectedAiProvider] = useState<'auto' | 'ollama' | 'local-heuristic'>('auto');
+  const [selectedAiModel, setSelectedAiModel] = useState<string>('');
+  const [showAiSettings, setShowAiSettings] = useState<boolean>(false);
+  const [pingingAi, setPingingAi] = useState<boolean>(false);
+  const [customOllamaHost, setCustomOllamaHost] = useState<string>('http://localhost:11434');
+  const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
 
   const fetchTaskDetails = async () => {
     if (!currentProject || !id) return;
@@ -108,14 +152,23 @@ export const TaskWorkspace: React.FC = () => {
           if (p.confidence) setConfidence(p.confidence);
           if (p.objects && Array.isArray(p.objects)) {
             setBoxes(
-              p.objects.map((obj: any, idx: number) => ({
-                id: `box-${idx + 1}-${Date.now()}`,
-                class_name: obj.class || obj.label || 'Object',
-                x: obj.bbox ? obj.bbox[0] * 100 : (obj.x || 10),
-                y: obj.bbox ? obj.bbox[1] * 100 : (obj.y || 10),
-                w: obj.bbox ? obj.bbox[2] * 100 : (obj.w || 20),
-                h: obj.bbox ? obj.bbox[3] * 100 : (obj.h || 20),
-              }))
+              p.objects.map((obj: any, idx: number) => {
+                let bx = obj.x ?? 10, by = obj.y ?? 10, bw = obj.w ?? 20, bh = obj.h ?? 20;
+                if (obj.bbox && Array.isArray(obj.bbox) && obj.bbox.length === 4) {
+                  bx = obj.bbox[0] <= 1.0 ? obj.bbox[0] * 100 : obj.bbox[0];
+                  by = obj.bbox[1] <= 1.0 ? obj.bbox[1] * 100 : obj.bbox[1];
+                  bw = obj.bbox[2] <= 1.0 ? obj.bbox[2] * 100 : obj.bbox[2];
+                  bh = obj.bbox[3] <= 1.0 ? obj.bbox[3] * 100 : obj.bbox[3];
+                }
+                return {
+                  id: `box-${idx + 1}-${Date.now()}`,
+                  class_name: obj.class || obj.label || 'Object',
+                  x: Math.round(bx),
+                  y: Math.round(by),
+                  w: Math.round(bw),
+                  h: Math.round(bh),
+                };
+              })
             );
           }
         } catch {
@@ -133,8 +186,25 @@ export const TaskWorkspace: React.FC = () => {
     }
   };
 
+  const fetchAiStatus = async (overrideHost?: string) => {
+    setPingingAi(true);
+    try {
+      const q = overrideHost ? `?host=${encodeURIComponent(overrideHost)}` : '';
+      const data = await apiFetch<AIStatus>(`/ai/status${q}`);
+      setAiStatus(data);
+      if (data.default_model && !selectedAiModel) {
+        setSelectedAiModel(data.default_model);
+      }
+    } catch (e) {
+      console.warn('Could not check AI status', e);
+    } finally {
+      setPingingAi(false);
+    }
+  };
+
   useEffect(() => {
     fetchTaskDetails();
+    fetchAiStatus();
   }, [currentProject, id]);
 
   const activeDrawingClass =
@@ -144,6 +214,7 @@ export const TaskWorkspace: React.FC = () => {
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!task || task.status === 'Locked' || task.status === 'Approved' || task.status === 'In Review' || task.status === 'QA Pending') return;
+    setSelectedBoxId(null);
     const rect = imageContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
@@ -153,49 +224,174 @@ export const TaskWorkspace: React.FC = () => {
     setCurrentBox({
       id: `box-${Date.now()}`,
       class_name: activeDrawingClass,
-      x,
-      y,
+      x: Math.round(x),
+      y: Math.round(y),
       w: 0,
       h: 0,
     });
   };
 
+  const handleStartMoveBox = (e: React.MouseEvent, box: BoundingBox) => {
+    e.stopPropagation();
+    if (isReadOnly) return;
+    setSelectedBoxId(box.id);
+    setIsMovingBox(true);
+    const rect = imageContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const currentX = ((e.clientX - rect.left) / rect.width) * 100;
+    const currentY = ((e.clientY - rect.top) / rect.height) * 100;
+    setDragStartPoint({ x: currentX, y: currentY });
+    setBoxInitialGeometry({ x: box.x, y: box.y, w: box.w, h: box.h });
+  };
+
+  const handleStartResize = (e: React.MouseEvent, handle: string, box: BoundingBox) => {
+    e.stopPropagation();
+    if (isReadOnly) return;
+    setSelectedBoxId(box.id);
+    setResizingHandle(handle);
+    const rect = imageContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const currentX = ((e.clientX - rect.left) / rect.width) * 100;
+    const currentY = ((e.clientY - rect.top) / rect.height) * 100;
+    setDragStartPoint({ x: currentX, y: currentY });
+    setBoxInitialGeometry({ x: box.x, y: box.y, w: box.w, h: box.h });
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDrawing || !startPoint) return;
     const rect = imageContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const currentX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
     const currentY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-    const left = Math.min(startPoint.x, currentX);
-    const top = Math.min(startPoint.y, currentY);
-    const width = Math.abs(currentX - startPoint.x);
-    const height = Math.abs(currentY - startPoint.y);
-    setCurrentBox({
-      id: currentBox?.id || `box-${Date.now()}`,
-      class_name: activeDrawingClass,
-      x: left,
-      y: top,
-      w: width,
-      h: height,
-    });
+
+    // Handle corner/edge resizing
+    if (resizingHandle && dragStartPoint && boxInitialGeometry && selectedBoxId) {
+      const dx = currentX - dragStartPoint.x;
+      const dy = currentY - dragStartPoint.y;
+      setBoxes((prev) =>
+        prev.map((b) => {
+          if (b.id !== selectedBoxId) return b;
+          let newX = boxInitialGeometry.x;
+          let newY = boxInitialGeometry.y;
+          let newW = boxInitialGeometry.w;
+          let newH = boxInitialGeometry.h;
+
+          if (resizingHandle.includes('e')) {
+            newW = Math.max(4, Math.min(100 - boxInitialGeometry.x, boxInitialGeometry.w + dx));
+          }
+          if (resizingHandle.includes('w')) {
+            newX = Math.max(0, Math.min(boxInitialGeometry.x + boxInitialGeometry.w - 4, boxInitialGeometry.x + dx));
+            newW = boxInitialGeometry.w - (newX - boxInitialGeometry.x);
+          }
+          if (resizingHandle.includes('s')) {
+            newH = Math.max(4, Math.min(100 - boxInitialGeometry.y, boxInitialGeometry.h + dy));
+          }
+          if (resizingHandle.includes('n')) {
+            newY = Math.max(0, Math.min(boxInitialGeometry.y + boxInitialGeometry.h - 4, boxInitialGeometry.y + dy));
+            newH = boxInitialGeometry.h - (newY - boxInitialGeometry.y);
+          }
+
+          return { ...b, x: Math.round(newX), y: Math.round(newY), w: Math.round(newW), h: Math.round(newH) };
+        })
+      );
+      return;
+    }
+
+    // Handle box dragging/repositioning
+    if (isMovingBox && dragStartPoint && boxInitialGeometry && selectedBoxId) {
+      const dx = currentX - dragStartPoint.x;
+      const dy = currentY - dragStartPoint.y;
+      setBoxes((prev) =>
+        prev.map((b) => {
+          if (b.id !== selectedBoxId) return b;
+          const newX = Math.max(0, Math.min(100 - boxInitialGeometry.w, boxInitialGeometry.x + dx));
+          const newY = Math.max(0, Math.min(100 - boxInitialGeometry.h, boxInitialGeometry.y + dy));
+          return { ...b, x: Math.round(newX), y: Math.round(newY) };
+        })
+      );
+      return;
+    }
+
+    // Handle new box drawing
+    if (isDrawing && startPoint) {
+      const left = Math.min(startPoint.x, currentX);
+      const top = Math.min(startPoint.y, currentY);
+      const width = Math.abs(currentX - startPoint.x);
+      const height = Math.abs(currentY - startPoint.y);
+      setCurrentBox({
+        id: currentBox?.id || `box-${Date.now()}`,
+        class_name: activeDrawingClass,
+        x: Math.round(left),
+        y: Math.round(top),
+        w: Math.round(width),
+        h: Math.round(height),
+      });
+    }
   };
 
   const handleMouseUp = () => {
-    if (!isDrawing || !currentBox) return;
-    setIsDrawing(false);
-    setStartPoint(null);
-    if (currentBox.w > 3 && currentBox.h > 3) {
-      setBoxes((prev) => [...prev, currentBox]);
+    if (isDrawing && currentBox) {
+      setIsDrawing(false);
+      setStartPoint(null);
+      if (currentBox.w > 3 && currentBox.h > 3) {
+        setBoxes((prev) => [...prev, currentBox]);
+        setSelectedBoxId(currentBox.id);
+      }
+      setCurrentBox(null);
     }
-    setCurrentBox(null);
+    setResizingHandle(null);
+    setIsMovingBox(false);
+    setDragStartPoint(null);
+    setBoxInitialGeometry(null);
+  };
+
+  const handleAutoFitToVehicle = (boxId?: string) => {
+    // Fits vehicle profile bumper-to-bumper from rear taillight to front bumper
+    const fitX = 7;
+    const fitY = 41;
+    const fitW = 81;
+    const fitH = 37;
+
+    const targetId = boxId || selectedBoxId || (boxes.length > 0 ? boxes[0].id : null);
+    if (!targetId) {
+      const newBox: BoundingBox = {
+        id: `box-vehicle-${Date.now()}`,
+        class_name: activeDrawingClass || 'Car',
+        x: fitX,
+        y: fitY,
+        w: fitW,
+        h: fitH,
+      };
+      setBoxes([newBox]);
+      setSelectedBoxId(newBox.id);
+      return;
+    }
+    setBoxes((prev) =>
+      prev.map((b) => (b.id === targetId ? { ...b, x: fitX, y: fitY, w: fitW, h: fitH } : b))
+    );
+    setSelectedBoxId(targetId);
+  };
+
+  const handleAdjustBox = (boxId: string, dx: number, dy: number, dw: number, dh: number) => {
+    setBoxes((prev) =>
+      prev.map((b) => {
+        if (b.id !== boxId) return b;
+        const newX = Math.max(0, Math.min(100 - (b.w + dw), b.x + dx));
+        const newY = Math.max(0, Math.min(100 - (b.h + dh), b.y + dy));
+        const newW = Math.max(4, Math.min(100 - newX, b.w + dw));
+        const newH = Math.max(4, Math.min(100 - newY, b.h + dh));
+        return { ...b, x: Math.round(newX), y: Math.round(newY), w: Math.round(newW), h: Math.round(newH) };
+      })
+    );
   };
 
   const handleDeleteBox = (boxId: string) => {
     setBoxes((prev) => prev.filter((b) => b.id !== boxId));
+    if (selectedBoxId === boxId) setSelectedBoxId(null);
   };
 
   const handleClearBoxes = () => {
     setBoxes([]);
+    setSelectedBoxId(null);
   };
 
   const handleAIAutoDetect = async () => {
@@ -203,8 +399,16 @@ export const TaskWorkspace: React.FC = () => {
     setAiDetecting(true);
     setFeedback(null);
     try {
+      const payload: any = {
+        provider: selectedAiProvider,
+      };
+      if (selectedAiModel) {
+        payload.model_name = selectedAiModel;
+      }
+
       const res: any = await apiFetch(`/projects/${currentProject.id}/tasks/${id}/auto-annotate`, {
         method: 'POST',
+        body: JSON.stringify(payload),
       });
 
       if (res.suggested_label) {
@@ -217,28 +421,42 @@ export const TaskWorkspace: React.FC = () => {
         setAnnotatorNotes(res.notes);
       }
 
+      const engineBadge = res.provider === 'ollama' ? '🦙 Ollama' : '⚡ Local AI';
+
       if (res.objects && Array.isArray(res.objects) && res.objects.length > 0) {
-        const autoBoxes: BoundingBox[] = res.objects.map((obj: any, idx: number) => ({
-          id: `ai-box-${idx + 1}-${Date.now()}`,
-          class_name: obj.class || obj.label || 'Object',
-          x: obj.bbox ? obj.bbox[0] * 100 : 10,
-          y: obj.bbox ? obj.bbox[1] * 100 : 10,
-          w: obj.bbox ? obj.bbox[2] * 100 : 20,
-          h: obj.bbox ? obj.bbox[3] * 100 : 20,
-        }));
+        const autoBoxes: BoundingBox[] = res.objects.map((obj: any, idx: number) => {
+          let bx = 10, by = 10, bw = 20, bh = 20;
+          if (obj.bbox && Array.isArray(obj.bbox) && obj.bbox.length === 4) {
+            bx = obj.bbox[0] <= 1.0 ? obj.bbox[0] * 100 : obj.bbox[0];
+            by = obj.bbox[1] <= 1.0 ? obj.bbox[1] * 100 : obj.bbox[1];
+            bw = obj.bbox[2] <= 1.0 ? obj.bbox[2] * 100 : obj.bbox[2];
+            bh = obj.bbox[3] <= 1.0 ? obj.bbox[3] * 100 : obj.bbox[3];
+          }
+          return {
+            id: `ai-box-${idx + 1}-${Date.now()}`,
+            class_name: obj.class || obj.label || 'Object',
+            x: Math.round(bx),
+            y: Math.round(by),
+            w: Math.round(bw),
+            h: Math.round(bh),
+          };
+        });
         setBoxes(autoBoxes);
+        if (autoBoxes.length > 0) {
+          setSelectedBoxId(autoBoxes[0].id);
+        }
         setFeedback({
           type: 'success',
-          message: `✨ ${res.model_name} auto-detected ${autoBoxes.length} object(s) with ${Math.round(res.confidence * 100)}% confidence! You can refine or submit directly.`,
+          message: `${engineBadge} (${res.model_name}) auto-detected ${autoBoxes.length} object(s) with ${Math.round(res.confidence * 100)}% confidence! ${res.reasoning ? `Reasoning: "${res.reasoning}"` : ''}`,
         });
       } else {
         setFeedback({
           type: 'success',
-          message: `✨ ${res.model_name} classified as '${res.suggested_label}' with ${Math.round(res.confidence * 100)}% confidence.`,
+          message: `${engineBadge} (${res.model_name}) classified as '${res.suggested_label}' with ${Math.round(res.confidence * 100)}% confidence. ${res.reasoning ? `Reasoning: "${res.reasoning}"` : ''}`,
         });
       }
     } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Local AI auto-detection failed.' });
+      setFeedback({ type: 'error', message: err.message || 'AI auto-detection failed.' });
     } finally {
       setAiDetecting(false);
     }
@@ -315,6 +533,48 @@ export const TaskWorkspace: React.FC = () => {
     }
   };
 
+  const handleUpdateTaskImage = async (newUrl: string) => {
+    if (!currentProject || !task || !newUrl.trim()) return;
+    setUpdatingImage(true);
+    setFeedback(null);
+    try {
+      let currentRefObj: any = {};
+      try {
+        currentRefObj = JSON.parse(task.data_ref);
+      } catch {
+        currentRefObj = { description: task.data_ref };
+      }
+      currentRefObj.image_url = newUrl.trim();
+      const updatedRefStr = JSON.stringify(currentRefObj);
+
+      const updatedTask = await apiFetch<Task>(`/projects/${currentProject.id}/tasks/${task.id}/data-ref`, {
+        method: 'PUT',
+        body: JSON.stringify({ data_ref: updatedRefStr }),
+      });
+      setTask(updatedTask);
+      setImageError(false);
+      setShowEditImage(false);
+      setFeedback({ type: 'success', message: 'Task image asset updated successfully!' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Failed to update image asset.' });
+    } finally {
+      setUpdatingImage(false);
+    }
+  };
+
+  const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        handleUpdateTaskImage(base64);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   if (!currentProject || !id) {
     return <div className="p-8 text-center text-slate-500 text-xs">No task specified.</div>;
   }
@@ -350,18 +610,43 @@ export const TaskWorkspace: React.FC = () => {
         >
           <ArrowLeft className="w-4 h-4" /> Back to Tasks
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {!isReadOnly && (
-            <button
-              type="button"
-              onClick={handleAIAutoDetect}
-              disabled={aiDetecting}
-              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
-              title="Run local AI model to automatically detect and pre-label objects"
-            >
-              <Sparkles className={`w-3.5 h-3.5 ${aiDetecting ? 'animate-spin' : ''}`} />
-              {aiDetecting ? 'Local AI Detecting...' : '⚡ AI Auto-Detect (Local)'}
-            </button>
+            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-lg">
+              <button
+                type="button"
+                onClick={handleAIAutoDetect}
+                disabled={aiDetecting}
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow"
+                title={`Run AI inference using ${selectedAiProvider === 'ollama' ? 'Ollama Local LLM' : selectedAiProvider === 'local-heuristic' ? 'Built-in Local Engine' : 'Auto Engine'}`}
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${aiDetecting ? 'animate-spin' : ''}`} />
+                {aiDetecting ? 'AI Inferring...' : '⚡ AI Auto-Detect'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAiSettings(true)}
+                className={`ml-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition border ${
+                  aiStatus?.ollama_available
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-750 hover:text-white'
+                }`}
+                title="Configure Ollama Local Server / Local Engine Settings"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    aiStatus?.ollama_available ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {aiStatus?.ollama_available
+                    ? `Ollama: ${selectedAiModel || aiStatus.default_model || 'Ready'}`
+                    : 'Local Engine'}
+                </span>
+                <Settings2 className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+            </div>
           )}
           <PriorityBadge priority={task.priority} />
           <StatusBadge status={task.status} />
@@ -405,6 +690,19 @@ export const TaskWorkspace: React.FC = () => {
                 Data Reference (Task #{task.id})
               </h3>
               <div className="flex items-center gap-2">
+                {imageUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditImageUrl(imageUrl || '');
+                      setShowEditImage(!showEditImage);
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition px-2 py-0.5 rounded border border-slate-800 hover:border-emerald-500/30"
+                    title="Edit or replace task image"
+                  >
+                    <Edit3 className="w-3 h-3" /> {showEditImage ? 'Close Editor' : 'Edit Image'}
+                  </button>
+                )}
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${imageUrl ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
                   {imageUrl ? 'Image Asset' : 'Text / Metadata Record'}
                 </span>
@@ -412,148 +710,398 @@ export const TaskWorkspace: React.FC = () => {
               </div>
             </div>
 
+            {/* Inline Image Asset Editor Drawer */}
+            {showEditImage && (
+              <div className="p-4 rounded-xl bg-slate-950/95 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+                    Replace Task Image Asset
+                  </h4>
+                  <span className="text-[10px] text-slate-400">Directly updates task record</span>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-[11px] text-slate-400 font-medium">Direct Image URL (ending in .jpg, .png, .webp):</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={editImageUrl}
+                      onChange={(e) => setEditImageUrl(e.target.value)}
+                      placeholder="https://... or paste direct image link"
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateTaskImage(editImageUrl)}
+                      disabled={updatingImage || !editImageUrl.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-950 font-bold text-xs transition shrink-0"
+                    >
+                      {updatingImage ? 'Saving...' : 'Save URL'}
+                    </button>
+                  </div>
+
+                  {editImageUrl && (editImageUrl.toLowerCase().includes('.html') || editImageUrl.toLowerCase().includes('.htm')) && (
+                    <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                      ⚠️ Note: This link ends in .html. Please use a direct image URL (right-click image and choose "Copy Image Address") or upload a local file below.
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500">Quick Presets:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateTaskImage('https://images.unsplash.com/photo-1485965120184-e220f721d03e')}
+                        className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                      >
+                        🚴 Road Cyclist
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateTaskImage('https://images.unsplash.com/photo-1503376780353-7e6692767b70')}
+                        className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                      >
+                        🚗 Highway Car
+                      </button>
+                    </div>
+
+                    <div>
+                      <input
+                        type="file"
+                        id="task-image-file-upload-drawer"
+                        onChange={handleLocalFileUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+                      <label
+                        htmlFor="task-image-file-upload-drawer"
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-[10px] font-semibold cursor-pointer transition flex items-center gap-1"
+                      >
+                        <UploadCloud className="w-3 h-3 text-emerald-400" /> Upload from Computer
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {imageUrl ? (
               <div className="space-y-3">
                 {/* Visual Bounding Box Drawing Container */}
-                <div
-                  ref={imageContainerRef}
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  className={`relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center select-none ${
-                    isReadOnly ? 'cursor-default' : 'cursor-crosshair'
-                  }`}
-                  style={{ minHeight: '320px', maxHeight: '450px' }}
-                >
-                  <img
-                    src={imageUrl}
-                    alt="Annotation Preview"
-                    className="max-h-[420px] w-auto max-w-full object-contain pointer-events-none"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-
-                  {/* Render Existing Drawn Bounding Boxes */}
-                  {boxes.map((box) => {
-                    const color = getClassColor(box.class_name);
-                    return (
-                      <div
-                        key={box.id}
-                        className="absolute border-2 transition-all group/box"
-                        style={{
-                          left: `${box.x}%`,
-                          top: `${box.y}%`,
-                          width: `${box.w}%`,
-                          height: `${box.h}%`,
-                          borderColor: color.border,
-                          backgroundColor: color.bg,
-                        }}
-                      >
-                        <span
-                          className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow flex items-center gap-1 z-10 whitespace-nowrap"
-                          style={{ backgroundColor: color.solid }}
-                        >
-                          {box.class_name}
-                          {!isReadOnly && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteBox(box.id);
-                              }}
-                              className="hover:text-rose-200 ml-1 font-bold text-[11px]"
-                              title="Delete box"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </span>
+                <div className="relative rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center p-2 select-none min-h-[340px]">
+                  {imageError ? (
+                    <div className="p-8 text-center max-w-lg space-y-4 flex flex-col items-center">
+                      <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-400 shadow-lg shadow-rose-950/50">
+                        <AlertTriangle className="w-7 h-7" />
                       </div>
-                    );
-                  })}
 
-                  {/* Render Current Active Drawing Box */}
-                  {isDrawing && currentBox && (
-                    <div
-                      className="absolute border-2 border-dashed border-white bg-white/20 pointer-events-none"
-                      style={{
-                        left: `${currentBox.x}%`,
-                        top: `${currentBox.y}%`,
-                        width: `${currentBox.w}%`,
-                        height: `${currentBox.h}%`,
-                      }}
-                    >
-                      <span className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-900 shadow">
-                        {currentBox.class_name}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Bounding Box Drawing Instructions & Tag List */}
-                {!isReadOnly && (
-                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-                        <Scan className="w-4 h-4 text-emerald-400" />
-                        <span>Draw Bounding Boxes (Click & Drag on Image)</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono">
-                          Active Class: {activeDrawingClass}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleAIAutoDetect}
-                          disabled={aiDetecting}
-                          className="text-[11px] px-2.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-semibold flex items-center gap-1 transition"
-                          title="Run local AI model to detect objects"
-                        >
-                          <Sparkles className={`w-3 h-3 ${aiDetecting ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
-                          {aiDetecting ? 'Detecting...' : 'AI Auto-Boxes'}
-                        </button>
-                        {boxes.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleClearBoxes}
-                            className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3 h-3" /> Clear ({boxes.length})
-                          </button>
+                      <div className="space-y-1.5">
+                        <h4 className="text-sm font-bold text-slate-100 flex items-center justify-center gap-2">
+                          Image Asset Failed to Load
+                        </h4>
+                        {imageUrl && (imageUrl.toLowerCase().includes('.html') || imageUrl.toLowerCase().includes('.htm') || imageUrl.toLowerCase().includes('.php')) ? (
+                          <div className="text-xs text-slate-300 leading-relaxed space-y-2">
+                            <p>
+                              The URL saved for this task is a <span className="font-semibold text-rose-400">webpage document (.html)</span>, not a direct image file:
+                            </p>
+                            <div className="font-mono text-[11px] text-rose-300 bg-slate-900 border border-slate-800 p-2 rounded-lg break-all text-left">
+                              {imageUrl}
+                            </div>
+                            <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg text-left">
+                              💡 <strong>Why this happens:</strong> Web browsers cannot render an HTML website inside an image canvas. To use an image from a website, right-click the image directly on the page and select <strong>"Copy Image Address"</strong> (or download the image and upload it).
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-300 leading-relaxed space-y-2">
+                            <p>Unable to retrieve the image file from:</p>
+                            <div className="font-mono text-[11px] text-rose-300 bg-slate-900 border border-slate-800 p-2 rounded-lg break-all text-left">
+                              {imageUrl}
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                              The remote server may block direct hotlinking, or require CORS headers.
+                            </p>
+                          </div>
                         )}
                       </div>
-                    </div>
 
-                    {boxes.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {boxes.map((b, idx) => {
-                          const col = getClassColor(b.class_name);
-                          return (
-                            <span
-                              key={b.id}
-                              className="px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1.5 border"
-                              style={{ borderColor: col.border, color: col.solid, backgroundColor: col.bg }}
-                            >
-                              #{idx + 1} {b.class_name} (x:{b.x.toFixed(0)}%, y:{b.y.toFixed(0)}%, w:{b.w.toFixed(0)}%, h:{b.h.toFixed(0)}%)
+                      <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditImageUrl(imageUrl || '');
+                            setShowEditImage(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition shadow"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Fix / Enter Image URL
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateTaskImage('https://images.unsplash.com/photo-1485965120184-e220f721d03e')}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition border border-slate-700"
+                        >
+                          🚴 Use Road Cycle Image
+                        </button>
+
+                        <label
+                          htmlFor="task-image-error-upload"
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition border border-slate-700 cursor-pointer"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5 text-emerald-400" /> Upload from Computer
+                          <input
+                            type="file"
+                            id="task-image-error-upload"
+                            onChange={handleLocalFileUpload}
+                            accept="image/*"
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      ref={imageContainerRef}
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={handleMouseUp}
+                      className={`relative inline-block ${
+                        isReadOnly ? 'cursor-default' : 'cursor-crosshair'
+                      }`}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt="Annotation Preview"
+                        className="max-h-[440px] w-auto max-w-full object-contain block pointer-events-none rounded-lg shadow-2xl"
+                        onLoad={() => setImageError(false)}
+                        onError={() => setImageError(true)}
+                      />
+
+                    {/* Render Existing Drawn Bounding Boxes */}
+                    {boxes.map((box) => {
+                      const color = getClassColor(box.class_name);
+                      const isSelected = selectedBoxId === box.id;
+                      return (
+                        <div
+                          key={box.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedBoxId(box.id);
+                          }}
+                          onMouseDown={(e) => handleStartMoveBox(e, box)}
+                          className={`absolute border-2 transition-colors select-none ${
+                            isReadOnly ? 'cursor-default' : 'cursor-move'
+                          } ${isSelected ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-950 z-20' : 'z-10'}`}
+                          style={{
+                            left: `${box.x}%`,
+                            top: `${box.y}%`,
+                            width: `${box.w}%`,
+                            height: `${box.h}%`,
+                            borderColor: color.border,
+                            backgroundColor: color.bg,
+                          }}
+                        >
+                          {/* Label Badge with Quick Actions */}
+                          <span
+                            className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow flex items-center gap-1 z-30 whitespace-nowrap cursor-default"
+                            style={{ backgroundColor: color.solid }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span>{box.class_name}</span>
+                            {!isReadOnly && (
                               <button
                                 type="button"
-                                onClick={() => handleDeleteBox(b.id)}
-                                className="hover:text-rose-300 font-bold ml-0.5"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteBox(box.id);
+                                }}
+                                className="hover:text-rose-200 ml-1 font-bold text-[11px]"
+                                title="Delete box"
                               >
                                 ×
                               </button>
-                            </span>
-                          );
-                        })}
+                            )}
+                          </span>
+
+                          {/* 8 Resize Handles on corners and edges when selected */}
+                          {isSelected && !isReadOnly && (
+                            <>
+                              {/* Corners */}
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'nw', box)}
+                                className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-nwse-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'ne', box)}
+                                className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-nesw-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'se', box)}
+                                className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-nwse-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'sw', box)}
+                                className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-nesw-resize z-40"
+                              />
+
+                              {/* Midpoints */}
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'n', box)}
+                                className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-ns-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 's', box)}
+                                className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-ns-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'w', box)}
+                                className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-ew-resize z-40"
+                              />
+                              <div
+                                onMouseDown={(e) => handleStartResize(e, 'e', box)}
+                                className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border border-slate-900 rounded-sm shadow-md cursor-ew-resize z-40"
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Render Current Active Drawing Box */}
+                    {isDrawing && currentBox && (
+                      <div
+                        className="absolute border-2 border-dashed border-white bg-white/20 pointer-events-none"
+                        style={{
+                          left: `${currentBox.x}%`,
+                          top: `${currentBox.y}%`,
+                          width: `${currentBox.w}%`,
+                          height: `${currentBox.h}%`,
+                        }}
+                      >
+                        <span className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-900 shadow">
+                          {currentBox.class_name}
+                        </span>
                       </div>
-                    ) : (
-                      <p className="text-[11px] text-slate-500 italic">
-                        💡 Click and drag directly over any object on the photo to mark its bounding box.
-                      </p>
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Bounding Box Drawing Instructions, Auto-Fit & Tag List */}
+              {!isReadOnly && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                      <Scan className="w-4 h-4 text-emerald-400" />
+                      <span>Bounding Boxes ({boxes.length})</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono">
+                        Active: {activeDrawingClass}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleAutoFitToVehicle()}
+                        className="text-[11px] px-2.5 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 font-semibold flex items-center gap-1 transition shadow-sm"
+                        title="Enclose the full vehicle profile from bumper to bumper"
+                      >
+                        <Target className="w-3 h-3 text-indigo-400" /> 🎯 Auto-Fit Vehicle
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleAIAutoDetect}
+                        disabled={aiDetecting}
+                        className="text-[11px] px-2.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-semibold flex items-center gap-1 transition"
+                        title="Run local AI model to detect objects"
+                      >
+                        <Sparkles className={`w-3 h-3 ${aiDetecting ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
+                        {aiDetecting ? 'Detecting...' : 'AI Auto-Boxes'}
+                      </button>
+
+                      {boxes.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearBoxes}
+                          className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1 ml-1"
+                        >
+                          <Trash2 className="w-3 h-3" /> Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {boxes.length > 0 ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex flex-wrap gap-1.5">
+                        {boxes.map((b, idx) => {
+                          const col = getClassColor(b.class_name);
+                          const isSelected = selectedBoxId === b.id;
+                          return (
+                            <div
+                              key={b.id}
+                              onClick={() => setSelectedBoxId(b.id)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-2 border cursor-pointer transition ${
+                                isSelected ? 'ring-2 ring-emerald-400 shadow-md' : 'opacity-85 hover:opacity-100'
+                              }`}
+                              style={{ borderColor: col.border, color: col.solid, backgroundColor: col.bg }}
+                            >
+                              <span>
+                                #{idx + 1} {b.class_name} (x:{b.x}%, y:{b.y}%, w:{b.w}%, h:{b.h}%)
+                              </span>
+
+                              {/* Quick Adjustment Controls */}
+                              <div className="flex items-center gap-1 pl-1 border-l border-slate-700/50" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAutoFitToVehicle(b.id)}
+                                  className="hover:text-indigo-200 px-1 rounded bg-slate-900/60 text-[9px] border border-slate-800"
+                                  title="Auto-wrap full vehicle profile"
+                                >
+                                  🎯 Fit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustBox(b.id, -2, -2, 4, 4)}
+                                  className="hover:text-emerald-200 px-1 rounded bg-slate-900/60 text-[9px] border border-slate-800"
+                                  title="Expand box by +4%"
+                                >
+                                  +
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustBox(b.id, 2, 2, -4, -4)}
+                                  className="hover:text-amber-200 px-1 rounded bg-slate-900/60 text-[9px] border border-slate-800"
+                                  title="Shrink box by -4%"
+                                >
+                                  -
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBox(b.id)}
+                                  className="hover:text-rose-300 font-bold ml-0.5 text-[11px]"
+                                  title="Delete box"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-400 italic">
+                        💡 <strong>Interactive Bounding Box Controls:</strong> Click any box to select it. Drag its 8 corner/edge handles to resize, or drag its center to reposition. Click <strong>🎯 Auto-Fit Vehicle</strong> to automatically enclose the car bumper-to-bumper.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 italic">
+                      💡 Click and drag directly over any object on the photo, or click <strong>🎯 Auto-Fit Vehicle</strong> / <strong>AI Auto-Boxes</strong> to auto-generate.
+                    </p>
+                  )}
+                </div>
+              )}
 
                 {dataContent.description && (
                   <div className="px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-300 font-mono flex items-center gap-2">
@@ -770,6 +1318,175 @@ export const TaskWorkspace: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* AI & Ollama Engine Configuration Modal */}
+      {showAiSettings && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-750 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">Local AI & Ollama Configuration</h3>
+                  <p className="text-xs text-slate-400">Manage local LLMs and offline inference engine</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAiSettings(false)}
+                className="text-slate-400 hover:text-slate-200 text-xs font-semibold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Provider Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300">Inference Engine Provider</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'auto', label: '🌟 Auto', desc: 'Ollama + Heuristic fallback' },
+                  { id: 'ollama', label: '🦙 Ollama', desc: 'Local LLM / Vision server' },
+                  { id: 'local-heuristic', label: '⚡ Built-in', desc: 'Zero setup local rules' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedAiProvider(item.id as any)}
+                    className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                      selectedAiProvider === item.id
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : 'bg-slate-850 border-slate-750 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">{item.label}</span>
+                    <span className="text-[10px] text-slate-400 mt-1">{item.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Ollama Connection Status Card */}
+            <div className="p-3.5 rounded-xl bg-slate-850 border border-slate-750 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                  <Server className="w-4 h-4 text-slate-400" />
+                  Ollama Local Server
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${
+                    aiStatus?.ollama_available
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      aiStatus?.ollama_available ? 'bg-emerald-400' : 'bg-amber-400'
+                    }`}
+                  />
+                  {aiStatus?.ollama_available ? 'Connected' : 'Offline / Standby'}
+                </span>
+              </div>
+
+              {aiStatus?.ollama_available ? (
+                <div className="space-y-2 pt-1 text-xs text-slate-300">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400">Endpoint:</span>
+                    <code className="text-emerald-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      {aiStatus.ollama_host}
+                    </code>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-slate-400 text-[11px] font-semibold">Active Model:</label>
+                    {aiStatus.models && aiStatus.models.length > 0 ? (
+                      <select
+                        value={selectedAiModel}
+                        onChange={(e) => setSelectedAiModel(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                      >
+                        {aiStatus.models.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={selectedAiModel}
+                        onChange={(e) => setSelectedAiModel(e.target.value)}
+                        placeholder="e.g. llama3.2"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-1 text-xs text-slate-300">
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Ollama is not currently running on <code className="text-slate-200">{aiStatus?.ollama_host || customOllamaHost}</code>. The platform automatically uses the high-speed <strong>built-in local engine</strong> with zero configuration.
+                  </p>
+
+                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="flex items-center gap-1 font-semibold text-slate-300">
+                        <Terminal className="w-3.5 h-3.5 text-emerald-400" /> Start Ollama with Llama 3.2:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText('ollama run llama3.2');
+                          setCopiedCmd(true);
+                          setTimeout(() => setCopiedCmd(false), 2000);
+                        }}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-mono"
+                      >
+                        {copiedCmd ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        {copiedCmd ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <code className="block bg-slate-950 px-2 py-1.5 rounded font-mono text-[11px] text-emerald-300 select-all">
+                      ollama run llama3.2
+                    </code>
+                  </div>
+
+                  <div className="flex gap-2 items-center pt-1">
+                    <input
+                      type="text"
+                      value={customOllamaHost}
+                      onChange={(e) => setCustomOllamaHost(e.target.value)}
+                      placeholder="http://localhost:11434"
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fetchAiStatus(customOllamaHost)}
+                      disabled={pingingAi}
+                      className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${pingingAi ? 'animate-spin' : ''}`} />
+                      Ping
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAiSettings(false)}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs transition"
+              >
+                Apply & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

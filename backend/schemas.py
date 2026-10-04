@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_serializer
 from typing import List, Optional, Any, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- USER SCHEMAS ---
 class UserCreate(BaseModel):
@@ -198,6 +198,11 @@ class TaskReopen(BaseModel):
     reason: str # Mandatory reason for admin reopen
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
+class TaskDataRefUpdate(BaseModel):
+    data_ref: str
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+
 class TaskStatusTransition(BaseModel):
     new_status: str
     reason: Optional[str] = None
@@ -265,6 +270,8 @@ class ImportJobOut(BaseModel):
     id: int
     project_id: int
     dataset_id: Optional[int] = None
+    filename: Optional[str] = None
+    dataset_name: Optional[str] = None
     status: str
     total_rows: int
     valid_rows: int
@@ -272,6 +279,12 @@ class ImportJobOut(BaseModel):
     created_at: datetime
     errors: Optional[List[ImportErrorOut]] = None
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime, _info):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
 
 class ImportConfirmRequest(BaseModel):
     dataset_name: Optional[str] = None
@@ -316,3 +329,32 @@ class NotificationOut(BaseModel):
     read: bool
     created_at: datetime
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+# --- AI & OLLAMA SCHEMAS ---
+class AutoAnnotateRequest(BaseModel):
+    provider: Optional[str] = "auto" # "auto", "ollama", "local-heuristic"
+    model_name: Optional[str] = None # e.g. "llama3.2", "llava", etc.
+    prompt_override: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+class AutoAnnotateResponse(BaseModel):
+    task_id: int
+    modality: str
+    provider: str
+    model_name: str
+    suggested_label: str
+    confidence: float
+    objects: List[Dict[str, Any]] = []
+    notes: str
+    reasoning: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+class AIStatusResponse(BaseModel):
+    ollama_available: bool
+    ollama_host: str
+    models: List[str] = []
+    default_model: Optional[str] = None
+    active_engine: str
+    message: str
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+

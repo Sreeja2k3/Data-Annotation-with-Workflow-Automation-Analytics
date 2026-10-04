@@ -21,12 +21,13 @@ from backend.schemas import (
     ProjectSettingOut, ProjectSettingUpdate,
     SchemaVersionCreate, SchemaVersionOut,
     DatasetOut,
-    TaskOut, TaskCreate, TaskSubmit, TaskAssign, TaskReassign, TaskPriorityUpdate, TaskReopen,
+    TaskOut, TaskCreate, TaskSubmit, TaskAssign, TaskReassign, TaskPriorityUpdate, TaskReopen, TaskDataRefUpdate,
     ReviewCreate, ReviewOut,
     CommentCreate, CommentOut,
-    ImportJobOut, ImportConfirmRequest,
+    ImportJobOut, ImportErrorOut, ImportConfirmRequest,
     DatasetSnapshotCreate, DatasetSnapshotOut,
-    AuditLogOut, NotificationOut
+    AuditLogOut, NotificationOut,
+    AutoAnnotateRequest, AutoAnnotateResponse, AIStatusResponse
 )
 from backend.auth import (
     hash_password, verify_password, create_access_token,
@@ -673,7 +674,33 @@ def list_import_jobs(
     db: Session = Depends(get_db)
 ):
     check_project_role(project_id, current_user, db, ["Admin", "Project Manager"])
-    return db.query(ImportJob).filter(ImportJob.project_id == project_id).order_by(ImportJob.created_at.desc()).all()
+    jobs = db.query(ImportJob).filter(ImportJob.project_id == project_id).order_by(ImportJob.created_at.desc()).all()
+    results = []
+    for j in jobs:
+        dname = j.dataset.name if j.dataset else None
+        fname = j.filename
+        if not fname and j.raw_valid_data_json:
+            try:
+                items = json.loads(j.raw_valid_data_json)
+                if items and isinstance(items, list):
+                    ref = json.loads(items[0].get("data_ref", "{}"))
+                    fname = ref.get("filename")
+            except Exception:
+                pass
+        results.append(ImportJobOut(
+            id=j.id,
+            project_id=j.project_id,
+            dataset_id=j.dataset_id,
+            filename=fname or (dname if dname else (f"Dataset #{j.dataset_id}" if j.dataset_id else "Uploaded File")),
+            dataset_name=dname,
+            status=j.status,
+            total_rows=j.total_rows,
+            valid_rows=j.valid_rows,
+            invalid_rows=j.invalid_rows,
+            created_at=j.created_at,
+            errors=[ImportErrorOut.model_validate(e) for e in j.errors] if j.errors else []
+        ))
+    return results
 
 @app.post("/api/projects/{project_id}/imports/upload", response_model=ImportJobOut)
 async def upload_and_validate_import(
@@ -686,7 +713,19 @@ async def upload_and_validate_import(
     check_project_role(project_id, current_user, db, ["Admin", "Project Manager"])
     content = await file.read()
     job = create_import_job_and_validate(db, project_id, content, file.filename, current_user.id)
-    return job
+    return ImportJobOut(
+        id=job.id,
+        project_id=job.project_id,
+        dataset_id=job.dataset_id,
+        filename=job.filename or file.filename,
+        dataset_name=job.dataset.name if job.dataset else None,
+        status=job.status,
+        total_rows=job.total_rows,
+        valid_rows=job.valid_rows,
+        invalid_rows=job.invalid_rows,
+        created_at=job.created_at,
+        errors=[ImportErrorOut.model_validate(e) for e in job.errors] if job.errors else []
+    )
 
 @app.post("/api/projects/{project_id}/imports/{job_id}/confirm")
 def confirm_import_and_generate_tasks(
@@ -899,6 +938,28 @@ def update_task_priority(
     db.commit()
     return {"message": "Priority updated", "task_id": task.id, "priority": task.priority}
 
+@app.put("/api/projects/{project_id}/tasks/{task_id}/data-ref", response_model=TaskOut)
+def update_task_data_ref(
+    project_id: int,
+    task_id: int,
+    dr_in: TaskDataRefUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Allows annotator, PM, or admin to update or fix a broken image URL/data_ref."""
+    check_project_role(project_id, current_user, db, ["Admin", "Project Manager", "Annotator"])
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    old_ref = task.data_ref
+    task.data_ref = dr_in.data_ref
+    task.updated_at = datetime.datetime.utcnow()
+    log_audit_event(db, current_user.id, "update_task_data_ref", "task", task.id, {"old_data_ref": old_ref, "new_data_ref": dr_in.data_ref})
+    db.commit()
+    db.refresh(task)
+    return task
+
 @app.post("/api/projects/{project_id}/tasks/{task_id}/submit", response_model=TaskOut)
 def submit_annotation(
     project_id: int,
@@ -911,22 +972,42 @@ def submit_annotation(
     check_project_role(project_id, current_user, db, ["Admin", "Annotator"])
     return submit_task_annotation(db, task_id, current_user, s_in.payload_json)
 
-@app.post("/api/projects/{project_id}/tasks/{task_id}/auto-annotate")
+@app.get("/api/ai/status", response_model=AIStatusResponse)
+def get_ai_status(
+    host: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Returns Ollama local server status, discovered models, and active inference engine."""
+    return LocalAIService.get_ollama_status(host)
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/auto-annotate", response_model=AutoAnnotateResponse)
 def auto_annotate_task(
     project_id: int,
     task_id: int,
+    req: Optional[AutoAnnotateRequest] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Runs local AI model inference on a task to predict labels and bounding boxes."""
+    """Runs Ollama or local AI model inference on a task to predict labels and bounding boxes."""
     check_project_role(project_id, current_user, db, ["Admin", "Annotator", "Project Manager"])
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
-    result = LocalAIService.auto_annotate_task(db, task)
+    provider = req.provider if req and req.provider else "auto"
+    model_name = req.model_name if req else None
+    prompt_override = req.prompt_override if req else None
+
+    result = LocalAIService.auto_annotate_task(
+        db=db,
+        task=task,
+        provider=provider,
+        model_name=model_name,
+        prompt_override=prompt_override
+    )
     log_audit_event(db, current_user.id, "ai_auto_annotate", "task", task.id, {
-        "model": result["model_name"],
+        "provider": result.get("provider"),
+        "model": result.get("model_name"),
         "objects_count": len(result.get("objects", [])),
         "suggested_label": result.get("suggested_label")
     })

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { ImportJob, TaskPriority, Task } from '../types';
-import { apiFetch } from '../lib/api';
+import { apiFetch, formatDateTime } from '../lib/api';
 import {
   UploadCloud,
   FileText,
@@ -15,6 +15,7 @@ import {
   Link,
   PlusCircle,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 
 export const ImportPage: React.FC = () => {
@@ -31,20 +32,25 @@ export const ImportPage: React.FC = () => {
   const [autoAssign, setAutoAssign] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [pastJobs, setPastJobs] = useState<ImportJob[]>([]);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
   // Direct Single Image / URL State
   const [singleImageUrl, setSingleImageUrl] = useState<string>('');
   const [singleDescription, setSingleDescription] = useState<string>('');
   const [singlePriority, setSinglePriority] = useState<TaskPriority>('Normal');
   const [creatingSingle, setCreatingSingle] = useState<boolean>(false);
+  const [urlPreviewError, setUrlPreviewError] = useState<boolean>(false);
 
   const fetchPastJobs = async () => {
     if (!currentProject) return;
+    setRefreshing(true);
     try {
       const data = await apiFetch<ImportJob[]>(`/projects/${currentProject.id}/imports`);
       setPastJobs(data);
     } catch {
       // Ignored
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -269,11 +275,25 @@ export const ImportPage: React.FC = () => {
               <input
                 type="url"
                 value={singleImageUrl}
-                onChange={(e) => setSingleImageUrl(e.target.value)}
-                placeholder="https://images.unsplash.com/photo-... or any public image URL"
+                onChange={(e) => {
+                  setSingleImageUrl(e.target.value);
+                  setUrlPreviewError(false);
+                }}
+                placeholder="https://images.unsplash.com/photo-... or any direct public image URL (.jpg, .png)"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                 required
               />
+              {singleImageUrl && (singleImageUrl.toLowerCase().includes('.html') || singleImageUrl.toLowerCase().includes('.htm')) && (
+                <div className="mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-amber-200">Warning: Webpage link detected (.html)</p>
+                    <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                      Browsers cannot render an HTML webpage as an image. To annotate the image on that page, right-click the image and select <strong>"Copy Image Address"</strong> so the link ends in <code>.jpg</code>, <code>.png</code>, or <code>.webp</code>, or upload the file directly.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -307,19 +327,28 @@ export const ImportPage: React.FC = () => {
             {singleImageUrl && (
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-4">
                 <div className="w-24 h-24 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-                  <img
-                    src={singleImageUrl}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
+                  {urlPreviewError ? (
+                    <AlertTriangle className="w-6 h-6 text-rose-400" />
+                  ) : (
+                    <img
+                      src={singleImageUrl}
+                      alt="Preview"
+                      className="w-full h-full object-cover"
+                      onLoad={() => setUrlPreviewError(false)}
+                      onError={() => setUrlPreviewError(true)}
+                    />
+                  )}
                 </div>
                 <div className="text-xs text-slate-400 space-y-1">
                   <p className="font-semibold text-slate-200">Image Asset Preview</p>
                   <p className="text-[11px] text-slate-500 truncate max-w-md">{singleImageUrl}</p>
-                  <p className="text-[10px] text-emerald-400">Ready to create task in backlog</p>
+                  {urlPreviewError ? (
+                    <p className="text-[11px] text-rose-400 font-semibold">
+                      ⚠️ Could not load image from this URL. Please verify it is a direct public image link.
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-emerald-400">✓ Ready to create task in backlog</p>
+                  )}
                 </div>
               </div>
             )}
@@ -435,42 +464,91 @@ export const ImportPage: React.FC = () => {
 
       {/* Past Import Jobs */}
       <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shadow-xl">
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-850">
-          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Import Job History</h3>
+        <div className="px-6 py-4 border-b border-slate-800 bg-slate-850 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Import Job History</h3>
+            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-400 font-semibold">
+              {pastJobs.length} {pastJobs.length === 1 ? 'record' : 'records'}
+            </span>
+          </div>
+          <button
+            onClick={fetchPastJobs}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-slate-100 text-xs font-medium transition disabled:opacity-50"
+            title="Refresh import history"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-400' : ''}`} />
+            <span>{refreshing ? 'Refreshing...' : 'Refresh History'}</span>
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950/60 text-slate-400 uppercase text-[10px] border-b border-slate-800">
               <tr>
-                <th className="px-6 py-3 font-semibold">Job ID</th>
-                <th className="px-6 py-3 font-semibold">Date</th>
-                <th className="px-6 py-3 font-semibold">Total Rows</th>
-                <th className="px-6 py-3 font-semibold">Valid Rows</th>
-                <th className="px-6 py-3 font-semibold">Errors</th>
-                <th className="px-6 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 font-semibold">Job ID</th>
+                <th className="px-5 py-3 font-semibold">Source Asset / File</th>
+                <th className="px-5 py-3 font-semibold">Target Dataset</th>
+                <th className="px-5 py-3 font-semibold">Date & Time</th>
+                <th className="px-5 py-3 font-semibold text-center">Total Rows</th>
+                <th className="px-5 py-3 font-semibold text-center">Valid</th>
+                <th className="px-5 py-3 font-semibold text-center">Errors</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
-              {pastJobs.map((j) => (
-                <tr key={j.id} className="hover:bg-slate-850/50 transition">
-                  <td className="px-6 py-3 font-mono font-semibold text-emerald-400">#{j.id}</td>
-                  <td className="px-6 py-3">{new Date(j.created_at).toLocaleString()}</td>
-                  <td className="px-6 py-3">{j.total_rows}</td>
-                  <td className="px-6 py-3 text-emerald-400">{j.valid_rows}</td>
-                  <td className="px-6 py-3 text-rose-400">{j.invalid_rows}</td>
-                  <td className="px-6 py-3">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                        j.status === 'Completed'
-                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                          : 'bg-amber-950 text-amber-300 border border-amber-800'
-                      }`}
-                    >
-                      {j.status}
-                    </span>
+              {pastJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-slate-500 text-xs">
+                    No import jobs recorded yet for this project.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                pastJobs.map((j) => (
+                  <tr key={j.id} className="hover:bg-slate-850/50 transition">
+                    <td className="px-5 py-3 font-mono font-semibold text-emerald-400">#{j.id}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        {j.filename && (j.filename.endsWith('.jpg') || j.filename.endsWith('.png') || j.filename.endsWith('.jpeg') || j.filename.endsWith('.webp')) ? (
+                          <ImageIcon className="w-4 h-4 text-sky-400 shrink-0" />
+                        ) : (
+                          <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                        )}
+                        <span className="font-semibold text-slate-200 truncate max-w-[200px]" title={j.filename}>
+                          {j.filename || 'Direct Upload'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className="text-slate-300 font-mono text-[11px]">
+                        {j.dataset_name || (j.dataset_id ? `Dataset #${j.dataset_id}` : '—')}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-slate-300 whitespace-nowrap">
+                      {formatDateTime(j.created_at)}
+                    </td>
+                    <td className="px-5 py-3 text-center">{j.total_rows}</td>
+                    <td className="px-5 py-3 text-center text-emerald-400 font-semibold">{j.valid_rows}</td>
+                    <td className="px-5 py-3 text-center">
+                      <span className={j.invalid_rows > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>
+                        {j.invalid_rows}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          j.status === 'Completed'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                            : j.status === 'Validated'
+                            ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                            : 'bg-rose-950 text-rose-300 border border-rose-800'
+                        }`}
+                      >
+                        {j.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

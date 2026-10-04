@@ -159,6 +159,7 @@ def create_import_job_and_validate(
 
     job = ImportJob(
         project_id=project_id,
+        filename=filename,
         status="Validated" if not error_list else ("Partial" if valid_items else "Failed"),
         total_rows=len(valid_items) + len(error_list),
         valid_rows=len(valid_items),

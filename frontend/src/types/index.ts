@@ -175,6 +175,8 @@ export interface ImportJob {
   id: number;
   project_id: number;
   dataset_id?: number;
+  filename?: string;
+  dataset_name?: string;
   status: string;
   total_rows: number;
   valid_rows: number;

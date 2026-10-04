@@ -154,13 +154,20 @@ export const ReviewWorkspace: React.FC = () => {
   const reviewBoxes: { id: string; class_name: string; x: number; y: number; w: number; h: number }[] = [];
   if (latestPayload.objects && Array.isArray(latestPayload.objects)) {
     latestPayload.objects.forEach((obj: any, idx: number) => {
+      let bx = obj.x ?? 10, by = obj.y ?? 10, bw = obj.w ?? 20, bh = obj.h ?? 20;
+      if (obj.bbox && Array.isArray(obj.bbox) && obj.bbox.length === 4) {
+        bx = obj.bbox[0] <= 1.0 ? obj.bbox[0] * 100 : obj.bbox[0];
+        by = obj.bbox[1] <= 1.0 ? obj.bbox[1] * 100 : obj.bbox[1];
+        bw = obj.bbox[2] <= 1.0 ? obj.bbox[2] * 100 : obj.bbox[2];
+        bh = obj.bbox[3] <= 1.0 ? obj.bbox[3] * 100 : obj.bbox[3];
+      }
       reviewBoxes.push({
         id: `review-box-${idx + 1}`,
         class_name: obj.class || obj.label || 'Object',
-        x: obj.bbox ? obj.bbox[0] * 100 : (obj.x || 10),
-        y: obj.bbox ? obj.bbox[1] * 100 : (obj.y || 10),
-        w: obj.bbox ? obj.bbox[2] * 100 : (obj.w || 20),
-        h: obj.bbox ? obj.bbox[3] * 100 : (obj.h || 20),
+        x: Math.round(bx),
+        y: Math.round(by),
+        w: Math.round(bw),
+        h: Math.round(bh),
       });
     });
   }
