@@ -54,11 +54,16 @@ class LocalAIService:
             "Motorcycle": [0.2500, 0.3400, 0.5100, 0.5900],
             "default": [0.2500, 0.3400, 0.5100, 0.5900]
         },
-        # Traffic light / Downtown street BMW M3 (Task 1, 6, 29)
+        # Traffic light / Downtown street BMW M3 (Task 1, 6)
         "photo-1549399542-7e3f8b79c341": {
             "Traffic Light": [0.4400, 0.1200, 0.1200, 0.2800],
-            "Car": [0.2200, 0.5400, 0.6500, 0.3950],
-            "default": [0.2200, 0.5400, 0.6500, 0.3950]
+            "Car": [0.2400, 0.6100, 0.5200, 0.2800],
+            "default": [0.2400, 0.6100, 0.5200, 0.2800]
+        },
+        # Overhead gantry active green traffic light (Task 29)
+        "traffic_light": {
+            "Traffic Light": [0.4350, 0.2650, 0.1350, 0.2700],
+            "default": [0.4350, 0.2650, 0.1350, 0.2700]
         },
         # Red sports sedan / Chevrolet Camaro (Task 9, 30)
         "photo-1552519507-da3b142c6e3d": {
