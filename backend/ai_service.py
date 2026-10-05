@@ -65,6 +65,16 @@ class LocalAIService:
             "Traffic Light": [0.4350, 0.2650, 0.1350, 0.2700],
             "default": [0.4350, 0.2650, 0.1350, 0.2700]
         },
+        # Suburban street corner red octagonal STOP sign (Task 14, 26)
+        "stop_sign": {
+            "Stop Sign": [0.7250, 0.1850, 0.1650, 0.2050],
+            "default": [0.7250, 0.1850, 0.1650, 0.2050]
+        },
+        # Snowy mountain pine road Audi Q5 SUV
+        "photo-1517524008697-84bbe3c3fd98": {
+            "Car": [0.3500, 0.5500, 0.3500, 0.2500],
+            "default": [0.3500, 0.5500, 0.3500, 0.2500]
+        },
         # Red sports sedan / Chevrolet Camaro (Task 9, 30)
         "photo-1552519507-da3b142c6e3d": {
             "Car": [0.1500, 0.3350, 0.6650, 0.4600],
